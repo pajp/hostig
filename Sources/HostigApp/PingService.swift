@@ -2,9 +2,13 @@ import Foundation
 
 enum PingService {
     static func sample(host: String) async throws -> PingSnapshot {
+        try await sample(host: host, count: 4)
+    }
+
+    static func sample(host: String, count: Int) async throws -> PingSnapshot {
         let output = try await ProcessRunner.run(
             executable: "/sbin/ping",
-            arguments: ["-n", "-q", "-c", "4", host],
+            arguments: ["-n", "-q", "-c", String(max(1, count)), host],
             timeout: 8
         )
 

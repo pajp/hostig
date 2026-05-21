@@ -1,5 +1,24 @@
 import Foundation
 
+enum HostSource: String, Codable, Equatable {
+    case bonjour
+    case manual
+}
+
+struct ManualHostEntry: Identifiable, Codable, Equatable {
+    let id: UUID
+    var displayName: String
+    var hostname: String
+    var port: Int
+
+    init(id: UUID = UUID(), displayName: String = "", hostname: String = "", port: Int = 22) {
+        self.id = id
+        self.displayName = displayName
+        self.hostname = hostname
+        self.port = port
+    }
+}
+
 struct HostMetrics: Equatable {
     var uptime: String
     var loadAverage: String
@@ -9,6 +28,7 @@ struct HostMetrics: Equatable {
     var memoryUsedPercent: Double?
     var userCount: Int
     var operatingSystem: String
+    var operatingSystemVersion: String
     var lastUpdated: Date
 }
 
@@ -26,8 +46,21 @@ struct PingSnapshot: Equatable {
     var lastUpdated: Date
 }
 
+struct PingHistoryPoint: Identifiable, Equatable {
+    let id: UUID
+    var timestamp: Date
+    var latencyMS: Double?
+
+    init(id: UUID = UUID(), timestamp: Date, latencyMS: Double?) {
+        self.id = id
+        self.timestamp = timestamp
+        self.latencyMS = latencyMS
+    }
+}
+
 struct HostRecord: Identifiable, Equatable {
     let id: UUID
+    var source: HostSource
     var serviceName: String
     var displayName: String
     var hostname: String
@@ -40,6 +73,7 @@ struct HostRecord: Identifiable, Equatable {
 
     init(
         id: UUID = UUID(),
+        source: HostSource = .bonjour,
         serviceName: String,
         displayName: String,
         hostname: String,
@@ -51,6 +85,7 @@ struct HostRecord: Identifiable, Equatable {
         rebootStatus: RebootStatus? = nil
     ) {
         self.id = id
+        self.source = source
         self.serviceName = serviceName
         self.displayName = displayName
         self.hostname = hostname

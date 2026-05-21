@@ -183,6 +183,7 @@ final class StatusBarPanel: NSPanel {
 }
 
 private struct StatusPanelContent: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: HostStore
     let openMainWindow: () -> Void
     var panelRefreshID = UUID()
@@ -198,6 +199,12 @@ private struct StatusPanelContent: View {
                 }
                 .buttonStyle(.borderless)
             }
+
+            CompactLatencyPanel(
+                host: store.latencyMonitorHost,
+                snapshot: store.latencyMonitorSnapshot,
+                history: store.latencyHistory
+            )
 
             HStack(spacing: 10) {
                 CapsuleMetric(title: "Hosts", value: "\(store.hosts.count)")
@@ -219,17 +226,58 @@ private struct StatusPanelContent: View {
         .frame(width: 360, height: 420, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.92))
+                .fill(panelFillStyle)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(.white.opacity(0.22), lineWidth: 1)
+                .strokeBorder(colorScheme == .dark ? .white.opacity(0.14) : .white.opacity(0.22), lineWidth: 1)
         )
         .id(panelRefreshID)
+    }
+
+    private var panelFillStyle: AnyShapeStyle {
+        if colorScheme == .dark {
+            return AnyShapeStyle(.regularMaterial.opacity(0.95))
+        }
+        return AnyShapeStyle(.ultraThinMaterial.opacity(0.92))
+    }
+}
+
+private struct CompactLatencyPanel: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let host: String
+    let snapshot: PingSnapshot?
+    let history: [PingHistoryPoint]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ping")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(host)
+                        .font(.caption.monospaced())
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text(snapshot?.latencyMS.map { String(format: "%.1f ms", $0) } ?? "n/a")
+                    .font(.headline.monospacedDigit())
+            }
+
+            MiniLatencyGraph(history: history)
+                .frame(height: 58)
+        }
+        .padding(12)
+        .background(
+            colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.1),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
     }
 }
 
 private struct CapsuleMetric: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let value: String
 
@@ -243,11 +291,15 @@ private struct CapsuleMetric: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }
 
 private struct StatusHostRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let host: HostRecord
 
     var body: some View {
@@ -275,7 +327,10 @@ private struct StatusHostRow: View {
             }
         }
         .padding(12)
-        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.1),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
     }
 
     private var statusColor: Color {

@@ -3,6 +3,7 @@
 `Hostig` is a SwiftUI macOS app that:
 
 - discovers `_ssh._tcp` Bonjour services on the local network
+- lets you add and remove non-Bonjour hosts from an editable host list
 - pings every discovered host and shows latency plus packet loss
 - attempts non-interactive SSH login using your existing `~/.ssh/config` and SSH agent
 - fetches remote uptime, load average, CPU, disk, memory, and logged-in user count for hosts where SSH succeeds

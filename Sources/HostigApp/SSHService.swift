@@ -37,6 +37,19 @@ struct SSHService {
         LANG=C
         export LC_ALL LANG
         os=$(uname -s 2>/dev/null || echo Unknown)
+        os_version=""
+        if [ "$os" = "Darwin" ]; then
+          os_version=$(sw_vers -productVersion 2>/dev/null || true)
+        elif [ "$os" = "Linux" ]; then
+          if [ -r /etc/os-release ]; then
+            os_version=$(awk -F= '/^VERSION_ID=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release)
+          fi
+          if [ -z "$os_version" ]; then
+            os_version=$(uname -r 2>/dev/null || true)
+          fi
+        else
+          os_version=$(uname -r 2>/dev/null || true)
+        fi
         uptime_raw=$(uptime 2>/dev/null || true)
         uptime_text=$(printf '%s\n' "$uptime_raw" | sed 's/.* up /up /' | sed 's/, *[0-9][0-9]* users\{0,1\}.*//')
         load=$(printf '%s\n' "$uptime_raw" | sed -n 's/.*load averages*: //p' | sed -n '1p')
@@ -128,6 +141,7 @@ struct SSHService {
           mem=$(free 2>/dev/null | awk '/^Mem:/ {if ($2 > 0) printf "%.1f", ($3 / $2) * 100}')
         fi
         printf 'os=%s\n' "$os"
+        printf 'os_version=%s\n' "$os_version"
         printf 'uptime=%s\n' "$uptime_text"
         printf 'load=%s\n' "$load"
         printf 'disk=%s\n' "$disk"
@@ -160,6 +174,7 @@ struct SSHService {
         else {
             throw SSHServiceError.metricsFailed(SSHServiceError.malformedResponse.localizedDescription)
         }
+        let osVersion = map["os_version"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let diskParts = disk.split(separator: "|").map(String.init)
         let diskFreeKB = Double(diskParts.first ?? "") ?? 0
@@ -177,6 +192,7 @@ struct SSHService {
             memoryUsedPercent: mem,
             userCount: users,
             operatingSystem: os,
+            operatingSystemVersion: osVersion.isEmpty ? "Unavailable" : osVersion,
             lastUpdated: .now
         )
     }

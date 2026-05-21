@@ -1,12 +1,17 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: HostStore
     @ObservedObject var mainWindowBridge: MainWindowBridge
     let statusBarController: StatusBarController
     @State private var passwordPromptHost: HostRecord?
     @State private var sudoPassword = ""
     @State private var rebootAlert: RebootAlert?
+    @State private var latencyHostDraft = ""
+    @State private var showingLatencyHostEditor = false
+    @State private var manualHostDrafts: [ManualHostEntry] = []
+    @State private var showingHostEditor = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,10 +53,15 @@ struct DashboardView: View {
         }
         .background(
             LinearGradient(
-                colors: [
-                    Color(red: 0.95, green: 0.97, blue: 0.98),
-                    Color(red: 0.90, green: 0.94, blue: 0.96)
-                ],
+                colors: colorScheme == .dark
+                    ? [
+                        Color(red: 0.10, green: 0.13, blue: 0.17),
+                        Color(red: 0.07, green: 0.10, blue: 0.14)
+                    ]
+                    : [
+                        Color(red: 0.95, green: 0.97, blue: 0.98),
+                        Color(red: 0.90, green: 0.94, blue: 0.96)
+                    ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -88,6 +98,29 @@ struct DashboardView: View {
         .alert(item: $rebootAlert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
         }
+        .sheet(isPresented: $showingLatencyHostEditor) {
+            PingHostEditorSheet(
+                host: $latencyHostDraft,
+                onCancel: { showingLatencyHostEditor = false },
+                onSave: {
+                    store.updateLatencyMonitorHost(latencyHostDraft)
+                    showingLatencyHostEditor = false
+                }
+            )
+            .frame(width: 420)
+        }
+        .sheet(isPresented: $showingHostEditor) {
+            HostListEditorSheet(
+                manualHosts: $manualHostDrafts,
+                discoveredHosts: store.hosts.filter { $0.source == .bonjour },
+                onCancel: { showingHostEditor = false },
+                onSave: {
+                    store.replaceManualHosts(manualHostDrafts)
+                    showingHostEditor = false
+                }
+            )
+            .frame(minWidth: 780, minHeight: 520)
+        }
         .background(WindowAccessor(mainWindowBridge: mainWindowBridge))
         .task {
             statusBarController.configureIfNeeded(store: store, mainWindowBridge: mainWindowBridge)
@@ -95,27 +128,46 @@ struct DashboardView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 18) {
+            LatencyPanel(
+                host: store.latencyMonitorHost,
+                snapshot: store.latencyMonitorSnapshot,
+                history: store.latencyHistory,
+                onChangeHost: {
+                    latencyHostDraft = store.latencyMonitorHost
+                    showingLatencyHostEditor = true
+                }
+            )
+            .frame(maxWidth: 520)
+
             Spacer(minLength: 0)
 
-            SummaryPill(title: "Hosts", value: "\(store.hosts.count)")
-            SummaryPill(title: "Authed", value: "\(store.hosts.filter(\.hasAuthenticatedSSH).count)")
-            SummaryPill(title: "No SSH", value: "\(store.hosts.filter { !$0.hasAuthenticatedSSH }.count)")
+            VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 10) {
+                    SummaryPill(title: "Hosts", value: "\(store.hosts.count)")
+                    SummaryPill(title: "Authed", value: "\(store.hosts.filter(\.hasAuthenticatedSSH).count)")
+                    SummaryPill(title: "No SSH", value: "\(store.hosts.filter { !$0.hasAuthenticatedSSH }.count)")
+                }
 
-            Divider()
-                .frame(height: 26)
+                HStack(spacing: 10) {
+                    Button("Add/Remove Hosts") {
+                        manualHostDrafts = store.manualHosts
+                        showingHostEditor = true
+                    }
+                    .buttonStyle(.bordered)
 
-            Button(store.discoveryActive ? "Pause Discovery" : "Resume Discovery") {
-                store.toggleDiscovery()
+                    Button(store.discoveryActive ? "Pause Discovery" : "Resume Discovery") {
+                        store.toggleDiscovery()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Refresh Now") {
+                        store.refreshAll()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
-            .buttonStyle(.bordered)
-
-            Button("Refresh Now") {
-                store.refreshAll()
-            }
-            .buttonStyle(.borderedProminent)
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 10)
@@ -128,7 +180,7 @@ struct DashboardView: View {
                 .foregroundStyle(.secondary)
             Text("No Bonjour SSH hosts discovered yet")
                 .font(.headline)
-            Text("The app scans for `_ssh._tcp` on the local network and will start ping and SSH probes as hosts appear.")
+            Text("The app scans for `_ssh._tcp` on the local network and can also monitor manually added hosts.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 500)
@@ -138,7 +190,273 @@ struct DashboardView: View {
     }
 }
 
+private struct HostListEditorSheet: View {
+    @Binding var manualHosts: [ManualHostEntry]
+    let discoveredHosts: [HostRecord]
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Host List")
+                .font(.title3.weight(.semibold))
+
+            Text("Manage non-Bonjour hosts here. Bonjour-discovered hosts remain automatic and read-only.")
+                .foregroundStyle(.secondary)
+
+            if !discoveredHosts.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Bonjour Hosts")
+                        .font(.headline)
+
+                    ForEach(discoveredHosts) { host in
+                        HStack(spacing: 12) {
+                            Text(host.displayName)
+                                .font(.body.weight(.medium))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(host.hostname)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("\(host.port)")
+                                .monospacedDigit()
+                                .frame(width: 56, alignment: .trailing)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Manual Hosts")
+                        .font(.headline)
+                    Spacer()
+                    Button("Add Host") {
+                        manualHosts.append(ManualHostEntry())
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack(spacing: 12) {
+                    Text("Name")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Hostname")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Port")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 72, alignment: .leading)
+                    Color.clear.frame(width: 60, height: 1)
+                }
+
+                ScrollView {
+                    VStack(spacing: 10) {
+                        if manualHosts.isEmpty {
+                            Text("No manual hosts yet.")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 18)
+                        } else {
+                            ForEach($manualHosts) { $host in
+                                ManualHostRow(host: $host) {
+                                    manualHosts.removeAll { $0.id == host.id }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: .infinity)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                Button("Save", action: onSave)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+    }
+}
+
+private struct ManualHostRow: View {
+    @Binding var host: ManualHostEntry
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TextField("Optional name", text: $host.displayName)
+                .textFieldStyle(.roundedBorder)
+
+            TextField("ssh.example.net", text: $host.hostname)
+                .textFieldStyle(.roundedBorder)
+
+            TextField(
+                "22",
+                value: $host.port,
+                format: .number.grouping(.never)
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 72)
+
+            Button("Remove", role: .destructive, action: onRemove)
+                .buttonStyle(.borderless)
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct LatencyPanel: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let host: String
+    let snapshot: PingSnapshot?
+    let history: [PingHistoryPoint]
+    let onChangeHost: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Latency Monitor")
+                        .font(.headline)
+                    Text(host)
+                        .font(.subheadline.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                Button("Change Host", action: onChangeHost)
+                    .buttonStyle(.bordered)
+            }
+
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(snapshot?.latencyMS.map { String(format: "%.1f ms", $0) } ?? "n/a")
+                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    Text("Current")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let packetLoss = snapshot?.packetLossPercent {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "%.0f%%", packetLoss))
+                            .font(.title3.monospacedDigit().weight(.semibold))
+                        Text("Loss")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            MiniLatencyGraph(history: history)
+                .frame(height: 88)
+        }
+        .padding(16)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(panelStroke, lineWidth: 1)
+        )
+    }
+
+    private var panelFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.72)
+    }
+
+    private var panelStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.05)
+    }
+}
+
+struct MiniLatencyGraph: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let history: [PingHistoryPoint]
+
+    var body: some View {
+        GeometryReader { geometry in
+            let values = history.compactMap(\.latencyMS)
+            let maxValue = max(values.max() ?? 1, 1)
+
+            ZStack(alignment: .bottomLeading) {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.white.opacity(0.45))
+
+                if history.count > 1 {
+                    Path { path in
+                        var started = false
+                        for (index, point) in history.enumerated() {
+                            guard let latency = point.latencyMS else {
+                                started = false
+                                continue
+                            }
+
+                            let x = geometry.size.width * CGFloat(index) / CGFloat(max(history.count - 1, 1))
+                            let y = geometry.size.height - ((CGFloat(latency) / CGFloat(maxValue)) * geometry.size.height)
+                            let cgPoint = CGPoint(x: x, y: max(6, min(geometry.size.height - 6, y)))
+
+                            if started {
+                                path.addLine(to: cgPoint)
+                            } else {
+                                path.move(to: cgPoint)
+                                started = true
+                            }
+                        }
+                    }
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.9), Color.teal.opacity(0.9)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                    )
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 6)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+}
+
+private struct PingHostEditorSheet: View {
+    @Binding var host: String
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Latency Host")
+                .font(.title3.weight(.semibold))
+            Text("Choose the host used for the top latency graph.")
+                .foregroundStyle(.secondary)
+            TextField("ping.sunet.se", text: $host)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                Button("Save", action: onSave)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+    }
+}
+
 private struct SummaryPill: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let value: String
 
@@ -152,11 +470,16 @@ private struct SummaryPill: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.04), lineWidth: 1)
+        )
     }
 }
 
 private struct HostCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let host: HostRecord
     let isRebooting: Bool
     let onReboot: (HostRecord) -> Void
@@ -206,6 +529,7 @@ private struct HostCard: View {
                     }
                     VStack(alignment: .leading, spacing: 10) {
                         DetailsRow(label: "OS", value: metrics.operatingSystem)
+                        DetailsRow(label: "Version", value: metrics.operatingSystemVersion)
                         DetailsRow(label: "Users", value: "\(metrics.userCount)")
                         DetailsRow(label: "Updated", value: metrics.lastUpdated.formatted(date: .omitted, time: .standard))
                     }
@@ -226,10 +550,10 @@ private struct HostCard: View {
             }
         }
         .padding(18)
-        .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(cardFill, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                .stroke(cardStroke, lineWidth: 1)
         )
     }
 
@@ -241,6 +565,14 @@ private struct HostCard: View {
             return reason
         }
         return "SSH metrics unavailable. Ping continues even when login fails."
+    }
+
+    private var cardFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.07) : Color.white.opacity(0.82)
+    }
+
+    private var cardStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.05)
     }
 }
 
@@ -342,6 +674,7 @@ private struct DetailsRow: View {
 }
 
 private struct StatChip: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let value: String
 
@@ -355,7 +688,10 @@ private struct StatChip: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }
 
