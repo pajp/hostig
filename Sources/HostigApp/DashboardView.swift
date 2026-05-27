@@ -42,6 +42,12 @@ struct DashboardView: View {
                                             }
                                         }
                                     }
+                                },
+                                onOpenTerminal: { selectedHost in
+                                    let url = URL(string: "ssh://\(selectedHost.hostname)")!
+                                    // open URL through LaunchServices
+                                    NSWorkspace.shared.open(url)
+                                    
                                 }
                             )
                         }
@@ -483,6 +489,7 @@ private struct HostCard: View {
     let host: HostRecord
     let isRebooting: Bool
     let onReboot: (HostRecord) -> Void
+    let onOpenTerminal: (HostRecord) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -495,7 +502,10 @@ private struct HostCard: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 8) {
+                HStack(spacing: 8) {
+                    Button("Terminal") {
+                        onOpenTerminal(host)
+                    }
                     if host.canShowRebootAction {
                         Button(isRebooting ? "Rebooting..." : "Reboot") {
                             onReboot(host)
@@ -515,6 +525,21 @@ private struct HostCard: View {
                         )
                     }
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Ping")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Last ~12 min")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                MiniLatencyGraph(history: host.pingHistory)
+                    .frame(height: 42)
             }
 
             if let metrics = host.metrics {

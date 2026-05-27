@@ -19,6 +19,7 @@ final class HostStore: NSObject, ObservableObject {
     private var latencyMonitorTask: Task<Void, Never>?
     private let latencyMonitorInterval: Duration = .seconds(1)
     private let maxLatencyHistoryPoints = 20 * 60
+    private let maxPerHostPingHistoryPoints = 60
     private let manualHostsDefaultsKey = "Hostig.manualHosts"
 
     override init() {
@@ -143,10 +144,14 @@ final class HostStore: NSObject, ObservableObject {
                 guard let host = self.hosts.first(where: { $0.id == id }) else { return }
                 do {
                     let snapshot = try await PingService.sample(host: host.hostname)
-                    self.updateHost(id) { $0.ping = snapshot }
+                    self.updateHost(id) {
+                        $0.ping = snapshot
+                        self.appendHostLatencyPoint(to: &$0.pingHistory, latencyMS: snapshot.latencyMS)
+                    }
                 } catch {
                     self.updateHost(id) {
                         $0.ping = PingSnapshot(latencyMS: nil, packetLossPercent: nil, lastUpdated: .now)
+                        self.appendHostLatencyPoint(to: &$0.pingHistory, latencyMS: nil)
                     }
                 }
 
@@ -299,6 +304,13 @@ final class HostStore: NSObject, ObservableObject {
         latencyHistory.append(PingHistoryPoint(timestamp: .now, latencyMS: latencyMS))
         if latencyHistory.count > maxLatencyHistoryPoints {
             latencyHistory.removeFirst(latencyHistory.count - maxLatencyHistoryPoints)
+        }
+    }
+
+    private func appendHostLatencyPoint(to history: inout [PingHistoryPoint], latencyMS: Double?) {
+        history.append(PingHistoryPoint(timestamp: .now, latencyMS: latencyMS))
+        if history.count > maxPerHostPingHistoryPoints {
+            history.removeFirst(history.count - maxPerHostPingHistoryPoints)
         }
     }
 

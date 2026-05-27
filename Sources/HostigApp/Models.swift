@@ -68,6 +68,7 @@ struct HostRecord: Identifiable, Equatable {
     var lastResolved: Date
     var sshState: SSHState
     var ping: PingSnapshot?
+    var pingHistory: [PingHistoryPoint]
     var metrics: HostMetrics?
     var rebootStatus: RebootStatus?
 
@@ -81,6 +82,7 @@ struct HostRecord: Identifiable, Equatable {
         lastResolved: Date = .now,
         sshState: SSHState = .idle,
         ping: PingSnapshot? = nil,
+        pingHistory: [PingHistoryPoint] = [],
         metrics: HostMetrics? = nil,
         rebootStatus: RebootStatus? = nil
     ) {
@@ -93,6 +95,7 @@ struct HostRecord: Identifiable, Equatable {
         self.lastResolved = lastResolved
         self.sshState = sshState
         self.ping = ping
+        self.pingHistory = pingHistory
         self.metrics = metrics
         self.rebootStatus = rebootStatus
     }
