@@ -2,10 +2,12 @@ import Foundation
 import HostigModels
 
 public enum HostigLinkService {
-    public static let bonjourType = "_hostig._tcp."
+    public static let bonjourType = "_hostig._udp"
     public static let bonjourDomain = "local."
     public static let snapshotPath = "/snapshot"
     public static let protocolVersion = 1
+    public static let pairingPINLength = 6
+    public static let cryptoSalt = "HostigLink.v1"
 }
 
 public struct HostigLinkIdentity: Codable, Equatable, Sendable {

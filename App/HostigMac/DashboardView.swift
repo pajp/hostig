@@ -1,9 +1,12 @@
 import SwiftUI
+import HostigLink
 import HostigLocalServices
 import HostigModels
+import HostigNetworking
 
 struct DashboardView: View {
     @ObservedObject var store: HostStore
+    @ObservedObject var linkServer: HostigUDPSourceServer
     @ObservedObject var mainWindowBridge: MainWindowBridge
     let statusBarController: StatusBarController
     @State private var passwordPromptHost: HostRecord?
@@ -118,6 +121,14 @@ struct DashboardView: View {
         .background(WindowAccessor(mainWindowBridge: mainWindowBridge))
         .task {
             statusBarController.configureIfNeeded(store: store, mainWindowBridge: mainWindowBridge)
+            linkServer.start(
+                provider: store,
+                identity: HostigLinkIdentity(
+                    appInstanceID: UUID(),
+                    deviceName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+                    platform: "macOS"
+                )
+            )
         }
     }
 
@@ -141,6 +152,7 @@ struct DashboardView: View {
                     SummaryPill(title: "Hosts", value: "\(store.hosts.count)")
                     SummaryPill(title: "Authed", value: "\(store.hosts.filter(\.hasAuthenticatedSSH).count)")
                     SummaryPill(title: "No SSH", value: "\(store.hosts.filter { !$0.hasAuthenticatedSSH }.count)")
+                    SummaryPill(title: "Vision PIN", value: linkServer.pairingPIN)
                 }
 
                 HStack(spacing: 10) {
@@ -468,6 +480,7 @@ private struct SummaryPill: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.headline.monospacedDigit().weight(.semibold))
+                .textSelection(.enabled)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)

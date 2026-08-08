@@ -1,9 +1,12 @@
 import SwiftUI
+import HostigLink
 import HostigLocalServices
+import HostigNetworking
 
 @main
 struct HostigApp: App {
     @StateObject private var store = HostStore()
+    @StateObject private var linkServer = HostigUDPSourceServer()
     @StateObject private var mainWindowBridge = MainWindowBridge()
     private let statusBarController = StatusBarController()
 
@@ -11,6 +14,7 @@ struct HostigApp: App {
         WindowGroup(id: "main") {
             DashboardView(
                 store: store,
+                linkServer: linkServer,
                 mainWindowBridge: mainWindowBridge,
                 statusBarController: statusBarController
             )

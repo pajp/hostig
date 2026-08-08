@@ -13,6 +13,12 @@
 		A00000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* Assets.xcassets */; };
 		A00000000000000000000011 /* HostigLocalServices in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000002 /* HostigLocalServices */; };
 		A00000000000000000000012 /* HostigModels in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000001 /* HostigModels */; };
+		A00000000000000000000020 /* HostigNetworking in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000003 /* HostigNetworking */; };
+		A00000000000000000000021 /* HostigVisionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020 /* HostigVisionApp.swift */; };
+		A00000000000000000000022 /* VisionDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* VisionDashboardView.swift */; };
+		A00000000000000000000023 /* HostigModels in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000001 /* HostigModels */; };
+		A00000000000000000000024 /* HostigLink in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000004 /* HostigLink */; };
+		A00000000000000000000025 /* HostigNetworking in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000003 /* HostigNetworking */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +27,9 @@
 		B00000000000000000000009 /* Hostig.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hostig.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00000000000000000000010 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		B00000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B00000000000000000000020 /* HostigVisionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostigVisionApp.swift; sourceTree = "<group>"; };
+		B00000000000000000000021 /* VisionDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionDashboardView.swift; sourceTree = "<group>"; };
+		B00000000000000000000022 /* HostigVision.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HostigVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -30,6 +39,17 @@
 			files = (
 				A00000000000000000000011 /* HostigLocalServices in Frameworks */,
 				A00000000000000000000012 /* HostigModels in Frameworks */,
+				A00000000000000000000020 /* HostigNetworking in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C00000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000023 /* HostigModels in Frameworks */,
+				A00000000000000000000024 /* HostigLink in Frameworks */,
+				A00000000000000000000025 /* HostigNetworking in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -39,27 +59,29 @@
 		D00000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
-				D00000000000000000000002 /* Sources */,
+				D00000000000000000000002 /* App/HostigMac */,
+				D00000000000000000000005 /* App/HostigVision */,
 				D00000000000000000000004 /* Packages */,
 				D00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		D00000000000000000000002 /* Sources */ = {
+		D00000000000000000000002 /* App/HostigMac */ = {
 			isa = PBXGroup;
-			path = App/HostigMac;
-			sourceTree = SOURCE_ROOT;
 			children = (
 				B00000000000000000000002 /* DashboardView.swift */,
 				B00000000000000000000003 /* HostigApp.swift */,
 				B00000000000000000000010 /* StatusBarController.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
 			);
+			path = App/HostigMac;
+			sourceTree = SOURCE_ROOT;
 		};
 		D00000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000009 /* Hostig.app */,
+				B00000000000000000000022 /* HostigVision.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +92,15 @@
 			);
 			name = Packages;
 			sourceTree = "<group>";
+		};
+		D00000000000000000000005 /* App/HostigVision */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000020 /* HostigVisionApp.swift */,
+				B00000000000000000000021 /* VisionDashboardView.swift */,
+			);
+			path = App/HostigVision;
+			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
 
@@ -90,9 +121,32 @@
 			packageProductDependencies = (
 				H00000000000000000000001 /* HostigModels */,
 				H00000000000000000000002 /* HostigLocalServices */,
+				H00000000000000000000003 /* HostigNetworking */,
 			);
 			productName = Hostig;
 			productReference = B00000000000000000000009 /* Hostig.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E00000000000000000000002 /* HostigVision */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F00000000000000000000006 /* Build configuration list for PBXNativeTarget "HostigVision" */;
+			buildPhases = (
+				G00000000000000000000003 /* Sources */,
+				C00000000000000000000002 /* Frameworks */,
+				G00000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HostigVision;
+			packageProductDependencies = (
+				H00000000000000000000001 /* HostigModels */,
+				H00000000000000000000004 /* HostigLink */,
+				H00000000000000000000003 /* HostigNetworking */,
+			);
+			productName = HostigVision;
+			productReference = B00000000000000000000022 /* HostigVision.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -106,6 +160,9 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					E00000000000000000000001 = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					E00000000000000000000002 = {
 						CreatedOnToolsVersion = 26.4;
 					};
 				};
@@ -127,6 +184,7 @@
 			projectRoot = "";
 			targets = (
 				E00000000000000000000001 /* Hostig */,
+				E00000000000000000000002 /* HostigVision */,
 			);
 		};
 /* End PBXProject section */
@@ -137,6 +195,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000010 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		G00000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -153,6 +218,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		G00000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000021 /* HostigVisionApp.swift in Sources */,
+				A00000000000000000000022 /* VisionDashboardView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -160,24 +234,20 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 7BJ49E34RD;
 				ENABLE_APP_SANDBOX = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Hostig;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hostig discovers SSH hosts on your local network.";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_FILE = App/HostigMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = local.hostig;
+				PRODUCT_BUNDLE_IDENTIFIER = nu.dll.hostig;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -189,28 +259,74 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 7BJ49E34RD;
 				ENABLE_APP_SANDBOX = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Hostig;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hostig discovers SSH hosts on your local network.";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_FILE = App/HostigMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = local.hostig;
+				PRODUCT_BUNDLE_IDENTIFIER = nu.dll.hostig;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		F00000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7BJ49E34RD;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = App/HostigVision/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = nu.dll.hostigvision;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = xros;
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Debug;
+		};
+		F00000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7BJ49E34RD;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = App/HostigVision/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = nu.dll.hostigvision;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = xros;
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Release;
 		};
@@ -235,6 +351,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		F00000000000000000000006 /* Build configuration list for PBXNativeTarget "HostigVision" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F00000000000000000000007 /* Debug */,
+				F00000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -254,6 +379,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = I00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HostigCore" */;
 			productName = HostigLocalServices;
+		};
+		H00000000000000000000003 /* HostigNetworking */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = I00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HostigCore" */;
+			productName = HostigNetworking;
+		};
+		H00000000000000000000004 /* HostigLink */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = I00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HostigCore" */;
+			productName = HostigLink;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

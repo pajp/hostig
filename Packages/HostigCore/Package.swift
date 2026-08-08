@@ -10,7 +10,8 @@ let package = Package(
     products: [
         .library(name: "HostigModels", targets: ["HostigModels"]),
         .library(name: "HostigLocalServices", targets: ["HostigLocalServices"]),
-        .library(name: "HostigLink", targets: ["HostigLink"])
+        .library(name: "HostigLink", targets: ["HostigLink"]),
+        .library(name: "HostigNetworking", targets: ["HostigNetworking"])
     ],
     targets: [
         .target(name: "HostigModels"),
@@ -21,6 +22,10 @@ let package = Package(
         .target(
             name: "HostigLink",
             dependencies: ["HostigModels"]
+        ),
+        .target(
+            name: "HostigNetworking",
+            dependencies: ["HostigModels", "HostigLink"]
         )
     ]
 )
