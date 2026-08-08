@@ -6,7 +6,7 @@ import HostigNetworking
 @main
 struct HostigApp: App {
     @StateObject private var store = HostStore()
-    @StateObject private var linkServer = HostigUDPSourceServer()
+    @StateObject private var linkServer = HostigLinkSourceServer()
     @StateObject private var mainWindowBridge = MainWindowBridge()
     private let statusBarController = StatusBarController()
 

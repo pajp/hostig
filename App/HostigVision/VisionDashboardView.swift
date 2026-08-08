@@ -235,7 +235,7 @@ private final class VisionCompanionStore: ObservableObject {
         defer { isRefreshing = false }
 
         do {
-            let transport = HostigUDPSnapshotTransport(identity: identity)
+            let transport = HostigTCPSnapshotTransport(identity: identity)
             snapshot = try await transport.fetchSnapshot(from: selectedSource, pin: pin)
         } catch {
             errorMessage = "Could not connect to \(sourceName): \(error.localizedDescription)"

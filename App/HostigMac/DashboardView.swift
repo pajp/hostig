@@ -6,7 +6,7 @@ import HostigNetworking
 
 struct DashboardView: View {
     @ObservedObject var store: HostStore
-    @ObservedObject var linkServer: HostigUDPSourceServer
+    @ObservedObject var linkServer: HostigLinkSourceServer
     @ObservedObject var mainWindowBridge: MainWindowBridge
     let statusBarController: StatusBarController
     @State private var passwordPromptHost: HostRecord?

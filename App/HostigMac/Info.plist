@@ -25,7 +25,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ssh._tcp</string>
-		<string>_hostig._udp</string>
+		<string>_hostig._tcp</string>
 	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
