@@ -40,6 +40,7 @@ public struct SSHService: Sendable {
         LANG=C
         export LC_ALL LANG
         os=$(uname -s 2>/dev/null || echo Unknown)
+        architecture=$(uname -m 2>/dev/null || echo Unknown)
         os_version=""
         if [ "$os" = "Darwin" ]; then
           os_version=$(sw_vers -productVersion 2>/dev/null || true)
@@ -145,6 +146,7 @@ public struct SSHService: Sendable {
         fi
         printf 'os=%s\n' "$os"
         printf 'os_version=%s\n' "$os_version"
+        printf 'architecture=%s\n' "$architecture"
         printf 'uptime=%s\n' "$uptime_text"
         printf 'load=%s\n' "$load"
         printf 'disk=%s\n' "$disk"
@@ -178,6 +180,7 @@ public struct SSHService: Sendable {
             throw SSHServiceError.metricsFailed(SSHServiceError.malformedResponse.localizedDescription)
         }
         let osVersion = map["os_version"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let architecture = map["architecture"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let diskParts = disk.split(separator: "|").map(String.init)
         let diskFreeKB = Double(diskParts.first ?? "") ?? 0
@@ -196,6 +199,7 @@ public struct SSHService: Sendable {
             userCount: users,
             operatingSystem: os,
             operatingSystemVersion: osVersion.isEmpty ? "Unavailable" : osVersion,
+            architecture: architecture.isEmpty ? "Unavailable" : architecture,
             lastUpdated: .now
         )
     }

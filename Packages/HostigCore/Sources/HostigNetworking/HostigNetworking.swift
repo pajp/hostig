@@ -5,6 +5,7 @@ import HostigLink
 import HostigModels
 @preconcurrency import Network
 import OSLog
+import Security
 
 private let linkLogger = Logger(subsystem: "nu.dll.hostig", category: "HostigLink")
 
@@ -55,6 +56,7 @@ public enum HostigNetworkingError: LocalizedError {
     case connectionFailed(String)
     case protocolMismatch
     case decryptionFailed
+    case pairingUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -72,7 +74,105 @@ public enum HostigNetworkingError: LocalizedError {
             return "The source is using an incompatible Hostig link protocol."
         case .decryptionFailed:
             return "Pairing failed. Check the PIN shown on the Mac."
+        case .pairingUnavailable:
+            return "This source needs to be paired with its 6-digit PIN again."
         }
+    }
+}
+
+public enum HostigPairingRole: String, Sendable {
+    case mac
+    case vision
+}
+
+public struct HostigRememberedSource: Codable, Equatable, Sendable {
+    public var endpointDescription: String
+    public var name: String
+    public var sourceAppInstanceID: UUID
+    public var keyID: String
+}
+
+public final class HostigLinkPairingStore: @unchecked Sendable {
+    private let role: HostigPairingRole
+    private let defaults: UserDefaults
+    private let rememberedSourcesKey: String
+    private let lastSourceKey: String
+    private let keychainService: String
+
+    public init(role: HostigPairingRole, defaults: UserDefaults = .standard) {
+        self.role = role
+        self.defaults = defaults
+        self.rememberedSourcesKey = "nu.dll.hostig.link.\(role.rawValue).rememberedSources"
+        self.lastSourceKey = "nu.dll.hostig.link.\(role.rawValue).lastSource"
+        self.keychainService = "nu.dll.hostig.link.\(role.rawValue).pairingKeys"
+    }
+
+    public func rememberedSources() -> [String: HostigRememberedSource] {
+        guard
+            let data = defaults.data(forKey: rememberedSourcesKey),
+            let sources = try? JSONDecoder().decode([String: HostigRememberedSource].self, from: data)
+        else {
+            return [:]
+        }
+        return sources
+    }
+
+    public func rememberedSource(endpointDescription: String) -> HostigRememberedSource? {
+        rememberedSources()[endpointDescription]
+    }
+
+    public func saveRememberedSource(_ source: HostigRememberedSource) {
+        var sources = rememberedSources()
+        sources[source.endpointDescription] = source
+        if let data = try? JSONEncoder().encode(sources) {
+            defaults.set(data, forKey: rememberedSourcesKey)
+        }
+    }
+
+    public var lastSourceEndpointDescription: String? {
+        get { defaults.string(forKey: lastSourceKey) }
+        set { defaults.set(newValue, forKey: lastSourceKey) }
+    }
+
+    public func keyData(for keyID: String) -> Data? {
+        var query = keychainBaseQuery(account: keyID)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess else {
+            return nil
+        }
+        return item as? Data
+    }
+
+    public func saveKeyData(_ keyData: Data, keyID: String) throws {
+        let query = keychainBaseQuery(account: keyID)
+        let attributes = [kSecValueData as String: keyData]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess {
+            return
+        }
+        guard updateStatus == errSecItemNotFound else {
+            throw HostigNetworkingError.connectionFailed("Could not update pairing key: \(updateStatus).")
+        }
+
+        var addQuery = query
+        addQuery[kSecValueData as String] = keyData
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw HostigNetworkingError.connectionFailed("Could not save pairing key: \(addStatus).")
+        }
+    }
+
+    private func keychainBaseQuery(account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: account
+        ]
     }
 }
 
@@ -163,9 +263,11 @@ public final class HostigLinkSourceServer: ObservableObject {
     private var listener: NWListener?
     private var provider: (any HostigSnapshotProvider)?
     private var identity: HostigLinkIdentity?
+    private let pairingStore: HostigLinkPairingStore
 
-    public init(pairingPIN: String? = nil) {
+    public init(pairingPIN: String? = nil, pairingStore: HostigLinkPairingStore = HostigLinkPairingStore(role: .mac)) {
         self.pairingPIN = pairingPIN ?? HostigPIN.generate()
+        self.pairingStore = pairingStore
     }
 
     public func rotatePIN() {
@@ -251,7 +353,10 @@ public final class HostigLinkSourceServer: ObservableObject {
             let requestData = try await connection.receiveFrame(timeoutNanoseconds: HostigLinkFrame.timeoutNanoseconds)
             linkLogger.info("Mac TCP received framed request: \(requestData.count, privacy: .public) bytes from \(connection.endpoint.debugDescription, privacy: .public)")
 
-            let request = try HostigSecureEnvelope.open(requestData, pin: pairingPIN)
+            let authentication = try authenticate(requestData)
+            guard let request = authentication.message else {
+                throw HostigNetworkingError.connectionFailed("Received an empty Hostig link request.")
+            }
             guard request.protocolVersion == HostigLinkService.protocolVersion else {
                 throw HostigNetworkingError.protocolMismatch
             }
@@ -259,7 +364,7 @@ public final class HostigLinkSourceServer: ObservableObject {
             let snapshot = await provider.currentSnapshot(identity: identity)
             let response = HostigLinkMessage(kind: .snapshotResponse, requestID: request.requestID, snapshot: snapshot)
             let responsePayload = try JSONEncoder.hostigLink.encode(response)
-            let encryptedResponse = try HostigSecureEnvelope.seal(response, pin: pairingPIN)
+            let encryptedResponse = try authentication.seal(response)
             linkLogger.info("Mac TCP sending snapshot response \(request.requestID.uuidString, privacy: .public): payload \(responsePayload.count, privacy: .public) bytes, encrypted \(encryptedResponse.count, privacy: .public) bytes")
 
             try await connection.sendFrame(encryptedResponse)
@@ -272,6 +377,29 @@ public final class HostigLinkSourceServer: ObservableObject {
             }
         }
     }
+
+    private func authenticate(_ data: Data) throws -> HostigLinkAuthentication {
+        if
+            let keyID = try HostigSecureEnvelope.keyID(in: data),
+            let keyData = pairingStore.keyData(for: keyID)
+        {
+            let message = try HostigSecureEnvelope.open(data, keyData: keyData)
+            linkLogger.info("Mac TCP authenticated request with remembered key \(keyID, privacy: .public)")
+            return HostigLinkAuthentication(message: message, keyData: keyData, keyID: keyID)
+        }
+
+        let message = try HostigSecureEnvelope.open(data, pin: pairingPIN)
+        if let requester = message.requester, let identity {
+            let credential = HostigPairingKeys.credential(
+                pin: pairingPIN,
+                requesterID: requester.appInstanceID,
+                sourceID: identity.appInstanceID
+            )
+            try pairingStore.saveKeyData(credential.keyData, keyID: credential.keyID)
+            linkLogger.info("Mac TCP saved remembered pairing key \(credential.keyID, privacy: .public) for requester \(requester.appInstanceID.uuidString, privacy: .public)")
+        }
+        return HostigLinkAuthentication(message: message, pin: pairingPIN)
+    }
 }
 
 public struct HostigTCPSnapshotTransport: HostigSnapshotTransport {
@@ -279,9 +407,15 @@ public struct HostigTCPSnapshotTransport: HostigSnapshotTransport {
     private let identity: HostigLinkIdentity
     private let queue = DispatchQueue(label: "local.hostig.link.tcp-client")
     private let timeoutNanoseconds: UInt64
+    private let pairingStore: HostigLinkPairingStore
 
-    public init(identity: HostigLinkIdentity, timeoutNanoseconds: UInt64 = 10_000_000_000) {
+    public init(
+        identity: HostigLinkIdentity,
+        pairingStore: HostigLinkPairingStore = HostigLinkPairingStore(role: .vision),
+        timeoutNanoseconds: UInt64 = 10_000_000_000
+    ) {
         self.identity = identity
+        self.pairingStore = pairingStore
         self.timeoutNanoseconds = timeoutNanoseconds
     }
 
@@ -289,7 +423,6 @@ public struct HostigTCPSnapshotTransport: HostigSnapshotTransport {
         guard source.transportKind == .tcp else {
             throw HostigNetworkingError.unsupportedTransport
         }
-        try HostigPIN.validate(pin)
 
         let connection = NWConnection(to: source.endpoint, using: .tcp)
         defer { connection.cancel() }
@@ -298,21 +431,60 @@ public struct HostigTCPSnapshotTransport: HostigSnapshotTransport {
         try await connection.waitUntilReady(on: queue, timeoutNanoseconds: timeoutNanoseconds)
 
         let request = HostigLinkMessage(kind: .snapshotRequest, requestID: UUID(), requester: identity)
-        let encryptedRequest = try HostigSecureEnvelope.seal(request, pin: pin)
+        let authentication = try authentication(for: source, pin: pin)
+        let encryptedRequest = try authentication.seal(request)
         linkLogger.info("Vision TCP sending snapshot request \(request.requestID.uuidString, privacy: .public): \(encryptedRequest.count, privacy: .public) bytes to \(source.endpoint.debugDescription, privacy: .public)")
         try await connection.sendFrame(encryptedRequest)
 
         let encryptedResponse = try await connection.receiveFrame(timeoutNanoseconds: timeoutNanoseconds)
         linkLogger.info("Vision TCP received encrypted response for \(request.requestID.uuidString, privacy: .public): \(encryptedResponse.count, privacy: .public) bytes from \(source.endpoint.debugDescription, privacy: .public)")
-        let response = try HostigSecureEnvelope.open(encryptedResponse, pin: pin)
+        let response = try authentication.open(encryptedResponse)
         guard response.protocolVersion == HostigLinkService.protocolVersion else {
             throw HostigNetworkingError.protocolMismatch
         }
         guard response.kind == .snapshotResponse, let snapshot = response.snapshot else {
             throw HostigNetworkingError.missingSnapshot
         }
+        if case .pin(let pin) = authentication.storage, !pin.isEmpty {
+            let credential = HostigPairingKeys.credential(
+                pin: pin,
+                requesterID: identity.appInstanceID,
+                sourceID: snapshot.identity.appInstanceID
+            )
+            try pairingStore.saveKeyData(credential.keyData, keyID: credential.keyID)
+            pairingStore.saveRememberedSource(
+                HostigRememberedSource(
+                    endpointDescription: source.endpointDescription,
+                    name: source.name,
+                    sourceAppInstanceID: snapshot.identity.appInstanceID,
+                    keyID: credential.keyID
+                )
+            )
+            pairingStore.lastSourceEndpointDescription = source.endpointDescription
+            linkLogger.info("Vision TCP saved remembered pairing key \(credential.keyID, privacy: .public) for source \(source.name, privacy: .public)")
+        } else {
+            pairingStore.lastSourceEndpointDescription = source.endpointDescription
+        }
         linkLogger.info("Vision TCP decoded snapshot \(request.requestID.uuidString, privacy: .public): \(snapshot.hosts.count, privacy: .public) host(s)")
         return snapshot
+    }
+
+    private func authentication(for source: HostigDiscoveredSource, pin: String) throws -> HostigLinkAuthentication {
+        if pin.count == HostigLinkService.pairingPINLength {
+            try HostigPIN.validate(pin)
+            return HostigLinkAuthentication(message: nil, pin: pin)
+        }
+
+        if
+            let rememberedSource = pairingStore.rememberedSource(endpointDescription: source.endpointDescription),
+            let keyData = pairingStore.keyData(for: rememberedSource.keyID)
+        {
+            linkLogger.info("Vision TCP using remembered pairing key \(rememberedSource.keyID, privacy: .public) for \(source.name, privacy: .public)")
+            return HostigLinkAuthentication(message: nil, keyData: keyData, keyID: rememberedSource.keyID)
+        }
+
+        try HostigPIN.validate(pin)
+        return HostigLinkAuthentication(message: nil, pin: pin)
     }
 }
 
@@ -343,17 +515,64 @@ private struct HostigLinkMessage: Codable {
     var error: String?
 }
 
+private struct HostigLinkAuthentication {
+    enum Storage {
+        case pin(String)
+        case key(Data, String)
+    }
+
+    var message: HostigLinkMessage?
+    var storage: Storage
+
+    init(message: HostigLinkMessage?, pin: String) {
+        self.message = message
+        self.storage = .pin(pin)
+    }
+
+    init(message: HostigLinkMessage?, keyData: Data, keyID: String) {
+        self.message = message
+        self.storage = .key(keyData, keyID)
+    }
+
+    func seal(_ message: HostigLinkMessage) throws -> Data {
+        switch storage {
+        case .pin(let pin):
+            return try HostigSecureEnvelope.seal(message, pin: pin)
+        case .key(let keyData, let keyID):
+            return try HostigSecureEnvelope.seal(message, keyData: keyData, keyID: keyID)
+        }
+    }
+
+    func open(_ data: Data) throws -> HostigLinkMessage {
+        switch storage {
+        case .pin(let pin):
+            return try HostigSecureEnvelope.open(data, pin: pin)
+        case .key(let keyData, _):
+            return try HostigSecureEnvelope.open(data, keyData: keyData)
+        }
+    }
+}
+
 private struct HostigSecureEnvelope: Codable {
+    var keyID: String?
     var nonce: Data
     var ciphertext: Data
     var tag: Data
 
     static func seal(_ message: HostigLinkMessage, pin: String) throws -> Data {
         try HostigPIN.validate(pin)
+        return try seal(message, key: key(from: pin), keyID: nil)
+    }
 
+    static func seal(_ message: HostigLinkMessage, keyData: Data, keyID: String) throws -> Data {
+        try seal(message, key: SymmetricKey(data: keyData), keyID: keyID)
+    }
+
+    private static func seal(_ message: HostigLinkMessage, key: SymmetricKey, keyID: String?) throws -> Data {
         let payload = try JSONEncoder.hostigLink.encode(message)
-        let sealedBox = try AES.GCM.seal(payload, using: key(from: pin))
+        let sealedBox = try AES.GCM.seal(payload, using: key)
         let envelope = HostigSecureEnvelope(
+            keyID: keyID,
             nonce: Data(sealedBox.nonce),
             ciphertext: sealedBox.ciphertext,
             tag: sealedBox.tag
@@ -361,15 +580,26 @@ private struct HostigSecureEnvelope: Codable {
         return try JSONEncoder.hostigLink.encode(envelope)
     }
 
+    static func keyID(in data: Data) throws -> String? {
+        try JSONDecoder.hostigLink.decode(HostigSecureEnvelope.self, from: data).keyID
+    }
+
     static func open(_ data: Data, pin: String) throws -> HostigLinkMessage {
         try HostigPIN.validate(pin)
+        return try open(data, key: key(from: pin))
+    }
 
+    static func open(_ data: Data, keyData: Data) throws -> HostigLinkMessage {
+        try open(data, key: SymmetricKey(data: keyData))
+    }
+
+    private static func open(_ data: Data, key: SymmetricKey) throws -> HostigLinkMessage {
         let envelope = try JSONDecoder.hostigLink.decode(HostigSecureEnvelope.self, from: data)
         let nonce = try AES.GCM.Nonce(data: envelope.nonce)
         let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: envelope.ciphertext, tag: envelope.tag)
         let payload: Data
         do {
-            payload = try AES.GCM.open(sealedBox, using: key(from: pin))
+            payload = try AES.GCM.open(sealedBox, using: key)
         } catch {
             throw HostigNetworkingError.decryptionFailed
         }
@@ -383,6 +613,21 @@ private struct HostigSecureEnvelope: Codable {
             info: Data("snapshot".utf8),
             outputByteCount: 32
         )
+    }
+}
+
+private enum HostigPairingKeys {
+    static func credential(pin: String, requesterID: UUID, sourceID: UUID) -> (keyID: String, keyData: Data) {
+        let key = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: Data(pin.utf8)),
+            salt: Data((HostigLinkService.cryptoSalt + ".pairing").utf8),
+            info: Data("\(requesterID.uuidString)|\(sourceID.uuidString)".utf8),
+            outputByteCount: 32
+        )
+        let keyData = key.withUnsafeBytes { Data($0) }
+        let keyIDPayload = Data("HostigLinkKey.v1|\(requesterID.uuidString)|\(sourceID.uuidString)".utf8)
+        let keyID = SHA256.hash(data: keyIDPayload).map { String(format: "%02x", $0) }.joined()
+        return (keyID, keyData)
     }
 }
 

@@ -20,6 +20,21 @@ public struct HostigLinkIdentity: Codable, Equatable, Sendable {
         self.deviceName = deviceName
         self.platform = platform
     }
+
+    public static func persisted(storageKey: String, deviceName: String, platform: String) -> HostigLinkIdentity {
+        let defaults = UserDefaults.standard
+        let appInstanceID: UUID
+        if
+            let storedValue = defaults.string(forKey: storageKey),
+            let storedID = UUID(uuidString: storedValue)
+        {
+            appInstanceID = storedID
+        } else {
+            appInstanceID = UUID()
+            defaults.set(appInstanceID.uuidString, forKey: storageKey)
+        }
+        return HostigLinkIdentity(appInstanceID: appInstanceID, deviceName: deviceName, platform: platform)
+    }
 }
 
 public struct HostigSnapshot: Codable, Equatable, Sendable {

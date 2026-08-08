@@ -133,8 +133,8 @@ struct DashboardView: View {
             statusBarController.configureIfNeeded(store: store, mainWindowBridge: mainWindowBridge)
             linkServer.start(
                 provider: store,
-                identity: HostigLinkIdentity(
-                    appInstanceID: UUID(),
+                identity: .persisted(
+                    storageKey: "nu.dll.hostig.mac.appInstanceID",
                     deviceName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
                     platform: "macOS"
                 )
@@ -595,6 +595,7 @@ private struct HostCard: View, Equatable {
                     VStack(alignment: .leading, spacing: 10) {
                         DetailsRow(label: "OS", value: metrics.operatingSystem)
                         DetailsRow(label: "Version", value: metrics.operatingSystemVersion)
+                        DetailsRow(label: "Arch", value: metrics.architecture)
                         DetailsRow(label: "Users", value: "\(metrics.userCount)")
                         DetailsRow(label: "Updated", value: metrics.lastUpdated.formatted(date: .omitted, time: .standard))
                     }

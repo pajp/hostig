@@ -67,7 +67,12 @@ struct VisionDashboardView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Pairing PIN")
                     .font(.headline)
-                TextField("000000", text: $store.pin)
+                if store.hasRememberedPairingForSelectedSource {
+                    Text("Remembered")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                TextField(store.hasRememberedPairingForSelectedSource ? "Optional" : "000000", text: $store.pin)
                     .textContentType(.oneTimeCode)
                     .keyboardType(.numberPad)
                     .monospacedDigit()
@@ -134,17 +139,24 @@ private final class VisionCompanionStore: ObservableObject {
     @Published var didAttemptRefresh = false
 
     private let browser = HostigBonjourSourceBrowser()
-    private let identity = HostigLinkIdentity(
-        appInstanceID: UUID(),
+    private let pairingStore = HostigLinkPairingStore(role: .vision)
+    private let identity = HostigLinkIdentity.persisted(
+        storageKey: "nu.dll.hostig.vision.appInstanceID",
         deviceName: "Hostig Vision",
         platform: "visionOS"
     )
     private var sourceUpdates: AnyCancellable?
     private var refreshTask: Task<Void, Never>?
     private var lastSelectedSource: HostigDiscoveredSource?
+    private var rememberedSources: [String: HostigRememberedSource] = [:]
 
     var canRefresh: Bool {
-        selectedSource != nil && pin.count == HostigLinkService.pairingPINLength && !isRefreshing
+        guard let selectedSource, !isRefreshing else { return false }
+        return pin.count == HostigLinkService.pairingPINLength || hasRememberedPairing(for: selectedSource)
+    }
+
+    var hasRememberedPairingForSelectedSource: Bool {
+        selectedSource.map(hasRememberedPairing(for:)) ?? false
     }
 
     var emptyStateTitle: String {
@@ -157,7 +169,7 @@ private final class VisionCompanionStore: ObservableObject {
         if selectedSource == nil {
             return "Select a Hostig Mac"
         }
-        if pin.count != HostigLinkService.pairingPINLength {
+        if !hasRememberedPairingForSelectedSource && pin.count != HostigLinkService.pairingPINLength {
             return "Enter Pairing PIN"
         }
         return didAttemptRefresh ? "No Snapshot Yet" : "Ready to Connect"
@@ -180,6 +192,9 @@ private final class VisionCompanionStore: ObservableObject {
         if selectedSource == nil {
             return "Choose one of the Hostig Macs discovered on your local network."
         }
+        if hasRememberedPairingForSelectedSource {
+            return "Tap Refresh to load the current host snapshot."
+        }
         if pin.count != HostigLinkService.pairingPINLength {
             return "Enter the 6-digit PIN shown by the Mac app to pair with this source."
         }
@@ -199,6 +214,7 @@ private final class VisionCompanionStore: ObservableObject {
     func start() {
         guard sourceUpdates == nil else { return }
 
+        rememberedSources = pairingStore.rememberedSources()
         sourceUpdates = browser.$sources.sink { [weak self] sources in
             guard let self else { return }
             self.sources = sources
@@ -206,8 +222,16 @@ private final class VisionCompanionStore: ObservableObject {
                let source = sources.first(where: { $0.id == selectedSourceID }) {
                 self.lastSelectedSource = source
             } else if self.selectedSourceID == nil {
-                self.selectedSourceID = sources.first?.id
-                self.lastSelectedSource = sources.first
+                let rememberedEndpoint = self.pairingStore.lastSourceEndpointDescription
+                let rememberedSource = rememberedEndpoint.flatMap { endpoint in
+                    sources.first { $0.endpointDescription == endpoint }
+                }
+                let source = rememberedSource ?? sources.first
+                self.selectedSourceID = source?.id
+                self.lastSelectedSource = source
+                if source != nil {
+                    Task { await self.refreshIfReady() }
+                }
             }
         }
         browser.start()
@@ -227,7 +251,7 @@ private final class VisionCompanionStore: ObservableObject {
     func refresh() async {
         guard let selectedSource else { return }
         lastSelectedSource = selectedSource
-        let pin = pin
+        let currentPIN = pin
         let sourceName = selectedSource.name
         isRefreshing = true
         didAttemptRefresh = true
@@ -235,11 +259,20 @@ private final class VisionCompanionStore: ObservableObject {
         defer { isRefreshing = false }
 
         do {
-            let transport = HostigTCPSnapshotTransport(identity: identity)
-            snapshot = try await transport.fetchSnapshot(from: selectedSource, pin: pin)
+            let transport = HostigTCPSnapshotTransport(identity: identity, pairingStore: pairingStore)
+            snapshot = try await transport.fetchSnapshot(from: selectedSource, pin: currentPIN)
+            rememberedSources = pairingStore.rememberedSources()
+            pin = ""
         } catch {
             errorMessage = "Could not connect to \(sourceName): \(error.localizedDescription)"
         }
+    }
+
+    private func hasRememberedPairing(for source: HostigDiscoveredSource) -> Bool {
+        guard let rememberedSource = rememberedSources[source.endpointDescription] else {
+            return false
+        }
+        return pairingStore.keyData(for: rememberedSource.keyID) != nil
     }
 
     deinit {
@@ -338,6 +371,7 @@ private struct VisionHostCard: View {
                         VStack(alignment: .leading, spacing: 10) {
                             DetailsRow(label: "OS", value: metrics.operatingSystem)
                             DetailsRow(label: "Version", value: metrics.operatingSystemVersion)
+                            DetailsRow(label: "Arch", value: metrics.architecture)
                             DetailsRow(label: "Users", value: "\(metrics.userCount)")
                             DetailsRow(label: "Updated", value: metrics.lastUpdated.formatted(date: .omitted, time: .standard))
                         }

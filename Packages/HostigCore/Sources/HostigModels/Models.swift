@@ -29,6 +29,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
     public var userCount: Int
     public var operatingSystem: String
     public var operatingSystemVersion: String
+    public var architecture: String
     public var lastUpdated: Date
 
     public init(
@@ -41,6 +42,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
         userCount: Int,
         operatingSystem: String,
         operatingSystemVersion: String,
+        architecture: String = "Unavailable",
         lastUpdated: Date
     ) {
         self.uptime = uptime
@@ -52,7 +54,52 @@ public struct HostMetrics: Codable, Equatable, Sendable {
         self.userCount = userCount
         self.operatingSystem = operatingSystem
         self.operatingSystemVersion = operatingSystemVersion
+        self.architecture = architecture
         self.lastUpdated = lastUpdated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uptime
+        case loadAverage
+        case cpuPercent
+        case diskUsedPercent
+        case diskFree
+        case memoryUsedPercent
+        case userCount
+        case operatingSystem
+        case operatingSystemVersion
+        case architecture
+        case lastUpdated
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        uptime = try container.decode(String.self, forKey: .uptime)
+        loadAverage = try container.decode(String.self, forKey: .loadAverage)
+        cpuPercent = try container.decode(Double.self, forKey: .cpuPercent)
+        diskUsedPercent = try container.decode(Double.self, forKey: .diskUsedPercent)
+        diskFree = try container.decode(String.self, forKey: .diskFree)
+        memoryUsedPercent = try container.decodeIfPresent(Double.self, forKey: .memoryUsedPercent)
+        userCount = try container.decode(Int.self, forKey: .userCount)
+        operatingSystem = try container.decode(String.self, forKey: .operatingSystem)
+        operatingSystemVersion = try container.decode(String.self, forKey: .operatingSystemVersion)
+        architecture = try container.decodeIfPresent(String.self, forKey: .architecture) ?? "Unavailable"
+        lastUpdated = try container.decode(Date.self, forKey: .lastUpdated)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(uptime, forKey: .uptime)
+        try container.encode(loadAverage, forKey: .loadAverage)
+        try container.encode(cpuPercent, forKey: .cpuPercent)
+        try container.encode(diskUsedPercent, forKey: .diskUsedPercent)
+        try container.encode(diskFree, forKey: .diskFree)
+        try container.encodeIfPresent(memoryUsedPercent, forKey: .memoryUsedPercent)
+        try container.encode(userCount, forKey: .userCount)
+        try container.encode(operatingSystem, forKey: .operatingSystem)
+        try container.encode(operatingSystemVersion, forKey: .operatingSystemVersion)
+        try container.encode(architecture, forKey: .architecture)
+        try container.encode(lastUpdated, forKey: .lastUpdated)
     }
 }
 
