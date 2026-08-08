@@ -3,7 +3,6 @@ import HostigLocalServices
 import HostigModels
 
 struct DashboardView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: HostStore
     @ObservedObject var mainWindowBridge: MainWindowBridge
     let statusBarController: StatusBarController
@@ -52,6 +51,7 @@ struct DashboardView: View {
                                     
                                 }
                             )
+                            .equatable()
                         }
                     }
                 }
@@ -59,21 +59,7 @@ struct DashboardView: View {
             }
             .background(Color(nsColor: .windowBackgroundColor))
         }
-        .background(
-            LinearGradient(
-                colors: colorScheme == .dark
-                    ? [
-                        Color(red: 0.10, green: 0.13, blue: 0.17),
-                        Color(red: 0.07, green: 0.10, blue: 0.14)
-                    ]
-                    : [
-                        Color(red: 0.95, green: 0.97, blue: 0.98),
-                        Color(red: 0.90, green: 0.94, blue: 0.96)
-                    ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background(Color(nsColor: .windowBackgroundColor))
         .sheet(item: $passwordPromptHost) { host in
             PasswordPromptSheet(
                 host: host,
@@ -389,28 +375,33 @@ private struct LatencyPanel: View {
 struct MiniLatencyGraph: View {
     @Environment(\.colorScheme) private var colorScheme
     let history: [PingHistoryPoint]
+    private let maxRenderedPoints = 120
 
     var body: some View {
         GeometryReader { geometry in
-            let values = history.compactMap(\.latencyMS)
+            let renderedHistory = downsampledHistory
+            let values = renderedHistory.compactMap(\.latencyMS)
             let maxValue = max(values.max() ?? 1, 1)
+            let inset: CGFloat = 7
+            let graphWidth = max(1, geometry.size.width - (inset * 2))
+            let graphHeight = max(1, geometry.size.height - (inset * 2))
 
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.white.opacity(0.45))
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.035))
 
-                if history.count > 1 {
+                if renderedHistory.count > 1 {
                     Path { path in
                         var started = false
-                        for (index, point) in history.enumerated() {
+                        for (index, point) in renderedHistory.enumerated() {
                             guard let latency = point.latencyMS else {
                                 started = false
                                 continue
                             }
 
-                            let x = geometry.size.width * CGFloat(index) / CGFloat(max(history.count - 1, 1))
-                            let y = geometry.size.height - ((CGFloat(latency) / CGFloat(maxValue)) * geometry.size.height)
-                            let cgPoint = CGPoint(x: x, y: max(6, min(geometry.size.height - 6, y)))
+                            let x = inset + (graphWidth * CGFloat(index) / CGFloat(max(renderedHistory.count - 1, 1)))
+                            let y = inset + graphHeight - ((CGFloat(latency) / CGFloat(maxValue)) * graphHeight)
+                            let cgPoint = CGPoint(x: x, y: max(inset, min(geometry.size.height - inset, y)))
 
                             if started {
                                 path.addLine(to: cgPoint)
@@ -421,18 +412,20 @@ struct MiniLatencyGraph: View {
                         }
                     }
                     .stroke(
-                        LinearGradient(
-                            colors: [Color.blue.opacity(0.9), Color.teal.opacity(0.9)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                        Color.teal.opacity(colorScheme == .dark ? 0.88 : 0.78),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
                     )
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 6)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var downsampledHistory: [PingHistoryPoint] {
+        guard history.count > maxRenderedPoints else { return history }
+
+        let stride = Double(history.count - 1) / Double(maxRenderedPoints - 1)
+        return (0..<maxRenderedPoints).map { index in
+            history[Int((Double(index) * stride).rounded())]
         }
     }
 }
@@ -486,12 +479,16 @@ private struct SummaryPill: View {
     }
 }
 
-private struct HostCard: View {
+private struct HostCard: View, Equatable {
     @Environment(\.colorScheme) private var colorScheme
     let host: HostRecord
     let isRebooting: Bool
     let onReboot: (HostRecord) -> Void
     let onOpenTerminal: (HostRecord) -> Void
+
+    nonisolated static func == (lhs: HostCard, rhs: HostCard) -> Bool {
+        lhs.host == rhs.host && lhs.isRebooting == rhs.isRebooting
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

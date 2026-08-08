@@ -19,8 +19,8 @@ public final class HostStore: NSObject, ObservableObject {
     private var pingTasks: [UUID: Task<Void, Never>] = [:]
     private var statsTasks: [UUID: Task<Void, Never>] = [:]
     private var latencyMonitorTask: Task<Void, Never>?
-    private let latencyMonitorInterval: Duration = .seconds(1)
-    private let maxLatencyHistoryPoints = 20 * 60
+    private let latencyMonitorInterval: Duration = .seconds(3)
+    private let maxLatencyHistoryPoints = 20 * 20
     private let maxPerHostPingHistoryPoints = 60
     private let manualHostsDefaultsKey = "Hostig.manualHosts"
 
@@ -140,20 +140,24 @@ public final class HostStore: NSObject, ObservableObject {
 
     private func beginMonitoring(for id: UUID) {
         pingTasks[id]?.cancel()
-        pingTasks[id] = Task { [weak self] in
+        pingTasks[id] = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                guard let host = self.hosts.first(where: { $0.id == id }) else { return }
+                guard let host = await self.host(with: id) else { return }
                 do {
                     let snapshot = try await PingService.sample(host: host.hostname)
-                    self.updateHost(id) {
-                        $0.ping = snapshot
-                        self.appendHostLatencyPoint(to: &$0.pingHistory, latencyMS: snapshot.latencyMS)
+                    await MainActor.run {
+                        self.updateHost(id) {
+                            $0.ping = snapshot
+                            self.appendHostLatencyPoint(to: &$0.pingHistory, latencyMS: snapshot.latencyMS)
+                        }
                     }
                 } catch {
-                    self.updateHost(id) {
-                        $0.ping = PingSnapshot(latencyMS: nil, packetLossPercent: nil, lastUpdated: .now)
-                        self.appendHostLatencyPoint(to: &$0.pingHistory, latencyMS: nil)
+                    await MainActor.run {
+                        self.updateHost(id) {
+                            $0.ping = PingSnapshot(latencyMS: nil, packetLossPercent: nil, lastUpdated: .now)
+                            self.appendHostLatencyPoint(to: &$0.pingHistory, latencyMS: nil)
+                        }
                     }
                 }
 
@@ -162,34 +166,44 @@ public final class HostStore: NSObject, ObservableObject {
         }
 
         statsTasks[id]?.cancel()
-        statsTasks[id] = Task { [weak self] in
+        statsTasks[id] = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                guard let host = self.hosts.first(where: { $0.id == id }) else { return }
-                self.updateHost(id) { $0.sshState = .probing }
+                guard let host = await self.host(with: id) else { return }
+                await MainActor.run {
+                    self.updateHost(id) { $0.sshState = .probing }
+                }
 
                 let service = SSHService()
 
                 do {
                     try await service.probe(host: host.hostname, port: host.port)
-                    self.updateHost(id) { $0.sshState = .authenticated }
+                    await MainActor.run {
+                        self.updateHost(id) { $0.sshState = .authenticated }
+                    }
 
                     do {
                         let metrics = try await service.fetchMetrics(host: host.hostname, port: host.port)
-                        self.updateHost(id) {
-                            $0.sshState = .authenticated
-                            $0.metrics = metrics
+                        await MainActor.run {
+                            self.updateHost(id) {
+                                $0.sshState = .authenticated
+                                $0.metrics = metrics
+                            }
                         }
                     } catch {
-                        self.updateHost(id) {
-                            $0.sshState = .metricsUnavailable(error.localizedDescription)
-                            $0.metrics = nil
+                        await MainActor.run {
+                            self.updateHost(id) {
+                                $0.sshState = .metricsUnavailable(error.localizedDescription)
+                                $0.metrics = nil
+                            }
                         }
                     }
                 } catch {
-                    self.updateHost(id) {
-                        $0.sshState = .unavailable(error.localizedDescription)
-                        $0.metrics = nil
+                    await MainActor.run {
+                        self.updateHost(id) {
+                            $0.sshState = .unavailable(error.localizedDescription)
+                            $0.metrics = nil
+                        }
                     }
                 }
 
@@ -204,21 +218,30 @@ public final class HostStore: NSObject, ObservableObject {
     }
 
     private func startLatencyMonitor() {
-        latencyMonitorTask = Task { [weak self] in
+        latencyMonitorTask = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
+                let monitorHost = await self.latencyMonitorHost
                 do {
-                    let snapshot = try await PingService.sample(host: self.latencyMonitorHost, count: 1)
-                    self.latencyMonitorSnapshot = snapshot
-                    self.appendLatencyPoint(snapshot.latencyMS)
+                    let snapshot = try await PingService.sample(host: monitorHost, count: 1)
+                    await MainActor.run {
+                        self.latencyMonitorSnapshot = snapshot
+                        self.appendLatencyPoint(snapshot.latencyMS)
+                    }
                 } catch {
-                    self.latencyMonitorSnapshot = PingSnapshot(latencyMS: nil, packetLossPercent: nil, lastUpdated: .now)
-                    self.appendLatencyPoint(nil)
+                    await MainActor.run {
+                        self.latencyMonitorSnapshot = PingSnapshot(latencyMS: nil, packetLossPercent: nil, lastUpdated: .now)
+                        self.appendLatencyPoint(nil)
+                    }
                 }
 
                 try? await Task.sleep(for: latencyMonitorInterval)
             }
         }
+    }
+
+    private func host(with id: UUID) -> HostRecord? {
+        hosts.first { $0.id == id }
     }
 
     private func updateHost(_ id: UUID, change: (inout HostRecord) -> Void) {
