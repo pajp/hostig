@@ -11,6 +11,7 @@ struct DashboardView: View {
     let statusBarController: StatusBarController
     @State private var passwordPromptHost: HostRecord?
     @State private var sudoPassword = ""
+    @State private var rebootConfirmationHost: HostRecord?
     @State private var rebootAlert: RebootAlert?
     @State private var latencyHostDraft = ""
     @State private var showingLatencyHostEditor = false
@@ -31,21 +32,7 @@ struct DashboardView: View {
                                 host: host,
                                 isRebooting: store.rebootingHostIDs.contains(host.id),
                                 onReboot: { selectedHost in
-                                    let hostStore = store
-                                    Task {
-                                        let result = await hostStore.requestReboot(for: selectedHost.id)
-                                        await MainActor.run {
-                                            switch result {
-                                            case .success(.started):
-                                                rebootAlert = RebootAlert(title: "Reboot Started", message: "\(selectedHost.displayName) accepted `sudo reboot`.")
-                                            case .success(.passwordRequired):
-                                                sudoPassword = ""
-                                                passwordPromptHost = selectedHost
-                                            case .failure(let message):
-                                                rebootAlert = RebootAlert(title: "Reboot Failed", message: message)
-                                            }
-                                        }
-                                    }
+                                    rebootConfirmationHost = selectedHost
                                 },
                                 onOpenTerminal: { selectedHost in
                                     let url = URL(string: "ssh://\(selectedHost.hostname)")!
@@ -95,6 +82,29 @@ struct DashboardView: View {
         .alert(item: $rebootAlert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
         }
+        .confirmationDialog(
+            rebootConfirmationHost.map { "Reboot \($0.displayName)?" } ?? "Reboot Host?",
+            isPresented: Binding(
+                get: { rebootConfirmationHost != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        rebootConfirmationHost = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: rebootConfirmationHost
+        ) { host in
+            Button("Reboot \(host.displayName)", role: .destructive) {
+                rebootConfirmationHost = nil
+                requestReboot(host)
+            }
+            Button("Cancel", role: .cancel) {
+                rebootConfirmationHost = nil
+            }
+        } message: { host in
+            Text("This will run `sudo reboot` on \(host.hostname).")
+        }
         .sheet(isPresented: $showingLatencyHostEditor) {
             PingHostEditorSheet(
                 host: $latencyHostDraft,
@@ -129,6 +139,24 @@ struct DashboardView: View {
                     platform: "macOS"
                 )
             )
+        }
+    }
+
+    private func requestReboot(_ selectedHost: HostRecord) {
+        let hostStore = store
+        Task {
+            let result = await hostStore.requestReboot(for: selectedHost.id)
+            await MainActor.run {
+                switch result {
+                case .success(.started):
+                    rebootAlert = RebootAlert(title: "Reboot Started", message: "\(selectedHost.displayName) accepted `sudo reboot`.")
+                case .success(.passwordRequired):
+                    sudoPassword = ""
+                    passwordPromptHost = selectedHost
+                case .failure(let message):
+                    rebootAlert = RebootAlert(title: "Reboot Failed", message: message)
+                }
+            }
         }
     }
 
