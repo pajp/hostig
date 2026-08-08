@@ -1,26 +1,27 @@
 import Foundation
+import HostigModels
 
-protocol BonjourScannerDelegate: AnyObject {
+public protocol BonjourScannerDelegate: AnyObject {
     func scanner(_ scanner: BonjourScanner, didResolve service: ResolvedSSHService)
     func scanner(_ scanner: BonjourScanner, didRemove serviceName: String)
 }
 
-final class BonjourScanner: NSObject {
-    weak var delegate: BonjourScannerDelegate?
+public final class BonjourScanner: NSObject {
+    public weak var delegate: BonjourScannerDelegate?
 
     private let browser = NetServiceBrowser()
     private var services: [String: NetService] = [:]
 
-    override init() {
+    public override init() {
         super.init()
         browser.delegate = self
     }
 
-    func start() {
+    public func start() {
         browser.searchForServices(ofType: "_ssh._tcp.", inDomain: "local.")
     }
 
-    func stop() {
+    public func stop() {
         browser.stop()
         services.values.forEach { service in
             service.stop()
@@ -31,7 +32,7 @@ final class BonjourScanner: NSObject {
 }
 
 extension BonjourScanner: NetServiceBrowserDelegate {
-    func netServiceBrowser(
+    public func netServiceBrowser(
         _ browser: NetServiceBrowser,
         didFind service: NetService,
         moreComing: Bool
@@ -41,7 +42,7 @@ extension BonjourScanner: NetServiceBrowserDelegate {
         service.resolve(withTimeout: 5)
     }
 
-    func netServiceBrowser(
+    public func netServiceBrowser(
         _ browser: NetServiceBrowser,
         didRemove service: NetService,
         moreComing: Bool
@@ -52,7 +53,7 @@ extension BonjourScanner: NetServiceBrowserDelegate {
 }
 
 extension BonjourScanner: NetServiceDelegate {
-    func netServiceDidResolveAddress(_ sender: NetService) {
+    public func netServiceDidResolveAddress(_ sender: NetService) {
         let host = (sender.hostName ?? sender.name)
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
 
@@ -67,7 +68,7 @@ extension BonjourScanner: NetServiceDelegate {
         )
     }
 
-    func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
+    public func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
         services.removeValue(forKey: sender.name)
     }
 }

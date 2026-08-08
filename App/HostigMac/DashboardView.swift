@@ -1,4 +1,6 @@
 import SwiftUI
+import HostigLocalServices
+import HostigModels
 
 struct DashboardView: View {
     @Environment(\.colorScheme) private var colorScheme

@@ -1,23 +1,31 @@
 import Foundation
 
-enum ProcessRunnerError: Error {
+public enum ProcessRunnerError: Error {
     case launchPathMissing(String)
     case nonZeroExit(Int32, String)
+    case unsupportedPlatform
 }
 
-struct ProcessOutput {
-    var stdout: String
-    var stderr: String
-    var status: Int32
+public struct ProcessOutput: Equatable, Sendable {
+    public var stdout: String
+    public var stderr: String
+    public var status: Int32
+
+    public init(stdout: String, stderr: String, status: Int32) {
+        self.stdout = stdout
+        self.stderr = stderr
+        self.status = status
+    }
 }
 
-enum ProcessRunner {
-    static func run(
+public enum ProcessRunner {
+    public static func run(
         executable: String,
         arguments: [String],
         stdin: Data? = nil,
         timeout: TimeInterval = 15
     ) async throws -> ProcessOutput {
+        #if os(macOS)
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let stdoutPipe = Pipe()
@@ -55,5 +63,8 @@ enum ProcessRunner {
                 continuation.resume(returning: ProcessOutput(stdout: stdout, stderr: stderr, status: process.terminationStatus))
             }
         }
+        #else
+        throw ProcessRunnerError.unsupportedPlatform
+        #endif
     }
 }

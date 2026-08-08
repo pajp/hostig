@@ -1,15 +1,17 @@
 import Foundation
 import Combine
+import HostigLink
+import HostigModels
 
 @MainActor
-final class HostStore: NSObject, ObservableObject {
-    @Published private(set) var hosts: [HostRecord] = []
-    @Published private(set) var manualHosts: [ManualHostEntry] = []
-    @Published var discoveryActive = true
-    @Published private(set) var rebootingHostIDs: Set<UUID> = []
-    @Published var latencyMonitorHost: String = "ping.sunet.se"
-    @Published private(set) var latencyMonitorSnapshot: PingSnapshot?
-    @Published private(set) var latencyHistory: [PingHistoryPoint] = []
+public final class HostStore: NSObject, ObservableObject {
+    @Published public private(set) var hosts: [HostRecord] = []
+    @Published public private(set) var manualHosts: [ManualHostEntry] = []
+    @Published public var discoveryActive = true
+    @Published public private(set) var rebootingHostIDs: Set<UUID> = []
+    @Published public var latencyMonitorHost: String = "ping.sunet.se"
+    @Published public private(set) var latencyMonitorSnapshot: PingSnapshot?
+    @Published public private(set) var latencyHistory: [PingHistoryPoint] = []
 
     private let scanner = BonjourScanner()
     private var hostIndexByService: [String: UUID] = [:]
@@ -22,7 +24,7 @@ final class HostStore: NSObject, ObservableObject {
     private let maxPerHostPingHistoryPoints = 60
     private let manualHostsDefaultsKey = "Hostig.manualHosts"
 
-    override init() {
+    public override init() {
         super.init()
         loadManualHosts()
         scanner.delegate = self
@@ -30,7 +32,7 @@ final class HostStore: NSObject, ObservableObject {
         startLatencyMonitor()
     }
 
-    func toggleDiscovery() {
+    public func toggleDiscovery() {
         discoveryActive.toggle()
         if discoveryActive {
             scanner.start()
@@ -39,14 +41,14 @@ final class HostStore: NSObject, ObservableObject {
         }
     }
 
-    func refreshAll() {
+    public func refreshAll() {
         for host in hosts {
             beginMonitoring(for: host.id)
         }
         restartLatencyMonitor()
     }
 
-    func updateLatencyMonitorHost(_ host: String) {
+    public func updateLatencyMonitorHost(_ host: String) {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != latencyMonitorHost else { return }
         latencyMonitorHost = trimmed
@@ -55,13 +57,13 @@ final class HostStore: NSObject, ObservableObject {
         restartLatencyMonitor()
     }
 
-    func replaceManualHosts(_ entries: [ManualHostEntry]) {
+    public func replaceManualHosts(_ entries: [ManualHostEntry]) {
         manualHosts = normalizeManualHosts(entries)
         persistManualHosts()
         syncManualHosts()
     }
 
-    func requestReboot(for id: UUID) async -> RebootAttemptResult {
+    public func requestReboot(for id: UUID) async -> RebootAttemptResult {
         guard let host = hosts.first(where: { $0.id == id }) else {
             return .failure("Host no longer exists.")
         }
@@ -86,7 +88,7 @@ final class HostStore: NSObject, ObservableObject {
         }
     }
 
-    func submitRebootPassword(_ password: String, for id: UUID) async -> PasswordRebootResult {
+    public func submitRebootPassword(_ password: String, for id: UUID) async -> PasswordRebootResult {
         guard let host = hosts.first(where: { $0.id == id }) else {
             return .failure("Host no longer exists.")
         }
@@ -321,14 +323,28 @@ final class HostStore: NSObject, ObservableObject {
     }
 }
 
+extension HostStore: HostigSnapshotProvider {
+    public nonisolated func currentSnapshot(identity: HostigLinkIdentity) async -> HostigSnapshot {
+        await MainActor.run {
+            HostigSnapshot(
+                identity: identity,
+                latencyMonitorHost: latencyMonitorHost,
+                latencyMonitorSnapshot: latencyMonitorSnapshot,
+                latencyHistory: latencyHistory,
+                hosts: hosts
+            )
+        }
+    }
+}
+
 extension HostStore: BonjourScannerDelegate {
-    nonisolated func scanner(_ scanner: BonjourScanner, didResolve service: ResolvedSSHService) {
+    public nonisolated func scanner(_ scanner: BonjourScanner, didResolve service: ResolvedSSHService) {
         Task { @MainActor in
             self.upsert(service)
         }
     }
 
-    nonisolated func scanner(_ scanner: BonjourScanner, didRemove serviceName: String) {
+    public nonisolated func scanner(_ scanner: BonjourScanner, didRemove serviceName: String) {
         Task { @MainActor in
             self.remove(serviceName: serviceName)
         }

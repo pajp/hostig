@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import HostigLocalServices
+import HostigModels
 
 @MainActor
 final class MainWindowBridge: NSObject, ObservableObject, NSWindowDelegate {

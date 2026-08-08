@@ -7,27 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A00000000000000000000001 /* BonjourScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* BonjourScanner.swift */; };
 		A00000000000000000000002 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* DashboardView.swift */; };
 		A00000000000000000000003 /* HostigApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* HostigApp.swift */; };
-		A00000000000000000000004 /* HostStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* HostStore.swift */; };
-		A00000000000000000000005 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* Models.swift */; };
-		A00000000000000000000006 /* PingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* PingService.swift */; };
-		A00000000000000000000007 /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000007 /* ProcessRunner.swift */; };
-		A00000000000000000000008 /* SSHService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* SSHService.swift */; };
 		A00000000000000000000009 /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* StatusBarController.swift */; };
 		A00000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* Assets.xcassets */; };
+		A00000000000000000000011 /* HostigLocalServices in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000002 /* HostigLocalServices */; };
+		A00000000000000000000012 /* HostigModels in Frameworks */ = {isa = PBXBuildFile; productRef = H00000000000000000000001 /* HostigModels */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		B00000000000000000000001 /* BonjourScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourScanner.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		B00000000000000000000003 /* HostigApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostigApp.swift; sourceTree = "<group>"; };
-		B00000000000000000000004 /* HostStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostStore.swift; sourceTree = "<group>"; };
-		B00000000000000000000005 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		B00000000000000000000006 /* PingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PingService.swift; sourceTree = "<group>"; };
-		B00000000000000000000007 /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
-		B00000000000000000000008 /* SSHService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHService.swift; sourceTree = "<group>"; };
 		B00000000000000000000009 /* Hostig.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hostig.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00000000000000000000010 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		B00000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -38,6 +28,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000011 /* HostigLocalServices in Frameworks */,
+				A00000000000000000000012 /* HostigModels in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -48,23 +40,18 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000002 /* Sources */,
+				D00000000000000000000004 /* Packages */,
 				D00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
 		D00000000000000000000002 /* Sources */ = {
 			isa = PBXGroup;
-			path = Sources/HostigApp;
+			path = App/HostigMac;
 			sourceTree = SOURCE_ROOT;
 			children = (
-				B00000000000000000000001 /* BonjourScanner.swift */,
 				B00000000000000000000002 /* DashboardView.swift */,
 				B00000000000000000000003 /* HostigApp.swift */,
-				B00000000000000000000004 /* HostStore.swift */,
-				B00000000000000000000005 /* Models.swift */,
-				B00000000000000000000006 /* PingService.swift */,
-				B00000000000000000000007 /* ProcessRunner.swift */,
-				B00000000000000000000008 /* SSHService.swift */,
 				B00000000000000000000010 /* StatusBarController.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
 			);
@@ -75,6 +62,13 @@
 				B00000000000000000000009 /* Hostig.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000004 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Packages;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -93,6 +87,10 @@
 			dependencies = (
 			);
 			name = Hostig;
+			packageProductDependencies = (
+				H00000000000000000000001 /* HostigModels */,
+				H00000000000000000000002 /* HostigLocalServices */,
+			);
 			productName = Hostig;
 			productReference = B00000000000000000000009 /* Hostig.app */;
 			productType = "com.apple.product-type.application";
@@ -121,6 +119,9 @@
 				Base,
 			);
 			mainGroup = D00000000000000000000001;
+			packageReferences = (
+				I00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HostigCore" */,
+			);
 			productRefGroup = D00000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -146,14 +147,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A00000000000000000000001 /* BonjourScanner.swift in Sources */,
 				A00000000000000000000002 /* DashboardView.swift in Sources */,
 				A00000000000000000000003 /* HostigApp.swift in Sources */,
-				A00000000000000000000004 /* HostStore.swift in Sources */,
-				A00000000000000000000005 /* Models.swift in Sources */,
-				A00000000000000000000006 /* PingService.swift in Sources */,
-				A00000000000000000000007 /* ProcessRunner.swift in Sources */,
-				A00000000000000000000008 /* SSHService.swift in Sources */,
 				A00000000000000000000009 /* StatusBarController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -241,6 +236,26 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		I00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HostigCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/HostigCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		H00000000000000000000001 /* HostigModels */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = I00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HostigCore" */;
+			productName = HostigModels;
+		};
+		H00000000000000000000002 /* HostigLocalServices */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = I00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HostigCore" */;
+			productName = HostigLocalServices;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F00000000000000000000001 /* Project object */;
 }

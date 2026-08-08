@@ -1,13 +1,14 @@
 import Foundation
+import HostigModels
 
-enum SSHServiceError: LocalizedError {
+public enum SSHServiceError: LocalizedError {
     case authenticationFailed(String)
     case metricsFailed(String)
     case rebootFailed(String)
     case sudoPasswordRequired
     case malformedResponse
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .authenticationFailed(let message):
             return message
@@ -23,15 +24,17 @@ enum SSHServiceError: LocalizedError {
     }
 }
 
-struct SSHService {
-    func probe(host: String, port: Int) async throws {
+public struct SSHService: Sendable {
+    public init() {}
+
+    public func probe(host: String, port: Int) async throws {
         let output = try await runSSH(host: host, port: port, remoteCommand: "printf '__HOSTIG_OK__\\n'")
         guard output.status == 0, output.stdout.contains("__HOSTIG_OK__") else {
             throw SSHServiceError.authenticationFailed(compactError(output.stderr, fallback: output.stdout))
         }
     }
 
-    func fetchMetrics(host: String, port: Int) async throws -> HostMetrics {
+    public func fetchMetrics(host: String, port: Int) async throws -> HostMetrics {
         let script = #"""
         LC_ALL=C
         LANG=C
@@ -197,7 +200,7 @@ struct SSHService {
         )
     }
 
-    func reboot(host: String, port: Int, sudoPassword: String? = nil) async throws -> RebootResolution {
+    public func reboot(host: String, port: Int, sudoPassword: String? = nil) async throws -> RebootResolution {
         if let sudoPassword {
             let output = try await runSSH(
                 host: host,

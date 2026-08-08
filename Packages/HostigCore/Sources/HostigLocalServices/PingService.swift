@@ -1,11 +1,12 @@
 import Foundation
+import HostigModels
 
-enum PingService {
-    static func sample(host: String) async throws -> PingSnapshot {
+public enum PingService {
+    public static func sample(host: String) async throws -> PingSnapshot {
         try await sample(host: host, count: 4)
     }
 
-    static func sample(host: String, count: Int) async throws -> PingSnapshot {
+    public static func sample(host: String, count: Int) async throws -> PingSnapshot {
         let output = try await ProcessRunner.run(
             executable: "/sbin/ping",
             arguments: ["-n", "-q", "-c", String(max(1, count)), host],
