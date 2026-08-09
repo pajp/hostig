@@ -6,22 +6,34 @@ import SwiftUI
 
 struct VisionDashboardView: View {
     @StateObject private var store = VisionCompanionStore()
+    @State private var isSourceSidebarVisible = true
+    private let hostColumns = [GridItem(.adaptive(minimum: 360), spacing: 12, alignment: .top)]
 
     var body: some View {
         GeometryReader { geometry in
-            let sidebarWidth = min(300, max(220, geometry.size.width * 0.32))
+            let sidebarWidth = min(520, max(380, geometry.size.width * 0.34))
 
-            HStack(spacing: 0) {
-                sourceSidebar
-                    .frame(width: sidebarWidth)
-                    .frame(maxHeight: .infinity)
-                    .background(.regularMaterial)
-
-                Divider()
+            HStack(alignment: .top, spacing: 12) {
+                if isSourceSidebarVisible {
+                    sourceSidebar
+                        .frame(width: sidebarWidth)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .spatialGlassPanel(depth: 18)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
 
                 snapshotContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .padding(.top, 18)
+            .padding(.bottom, 18)
+            .padding(.trailing, 18)
+            .padding(.leading, isSourceSidebarVisible ? 0 : 18)
+            .background {
+                SpatialBackdrop()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .animation(.easeInOut(duration: 0.22), value: isSourceSidebarVisible)
         }
         .task {
             store.start()
@@ -37,34 +49,27 @@ struct VisionDashboardView: View {
     }
 
     private var sourceSidebar: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Hostig")
-                .font(.largeTitle.weight(.semibold))
-                .padding(.horizontal, 20)
-                .padding(.top, 24)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text("Hostig")
+                    .font(.title.weight(.semibold))
 
-            List(selection: $store.selectedSourceID) {
-                Section("Sources") {
-                    if store.sources.isEmpty {
-                        Text("No Hostig Macs found")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.sources) { source in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(source.name)
-                                    .font(.body.weight(.medium))
-                                Text(source.endpointDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            .tag(source.id)
-                        }
-                    }
+                Spacer()
+
+                Button {
+                    isSourceSidebarVisible = false
+                } label: {
+                    Image(systemName: "sidebar.left")
                 }
+                .buttonStyle(.bordered)
+                .help("Hide sources")
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
 
-            VStack(alignment: .leading, spacing: 12) {
+            sourceRows
+
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Pairing PIN")
                     .font(.headline)
                 if store.hasRememberedPairingForSelectedSource {
@@ -94,37 +99,118 @@ struct VisionDashboardView: View {
                         .foregroundStyle(.red)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+            .offset(z: 8)
         }
+    }
+
+    private var sourceRows: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Sources")
+                .font(.headline)
+                .padding(.horizontal, 4)
+
+            if store.sources.isEmpty {
+                Text("No Hostig Macs found")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 8)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(store.sources) { source in
+                            sourceButton(for: source)
+                        }
+                    }
+                }
+                .scrollClipDisabled()
+                .frame(maxHeight: min(220, CGFloat(store.sources.count) * 72))
+            }
+        }
+        .padding(.horizontal, 12)
+        .offset(z: 8)
+    }
+
+    private func sourceButton(for source: HostigDiscoveredSource) -> some View {
+        Button {
+            store.selectedSourceID = source.id
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(source.name)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                Text(source.endpointDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                store.selectedSourceID == source.id ? Color.primary.opacity(0.12) : Color.secondary.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .hoverEffect(.highlight)
     }
 
     @ViewBuilder
     private var snapshotContent: some View {
         if let snapshot = store.snapshot {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if !isSourceSidebarVisible {
+                        sourceToggleButton
+                            .offset(z: 30)
+                            .transition(.opacity)
+                    }
+
                     HeaderPanel(snapshot: snapshot, isRefreshing: store.isRefreshing) {
                         Task { await store.refresh() }
                     }
 
-                    LazyVStack(spacing: 14) {
+                    LazyVGrid(columns: hostColumns, alignment: .leading, spacing: 12) {
                         ForEach(snapshot.hosts) { host in
                             VisionHostCard(host: host)
                         }
                     }
                 }
-                .padding(28)
+                .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(.thinMaterial)
+            .scrollClipDisabled()
         } else {
             ContentUnavailableView(
                 store.emptyStateTitle,
                 systemImage: store.emptyStateSystemImage,
                 description: Text(store.emptyStateDescription)
             )
+            .padding(28)
+            .spatialGlassPanel(depth: 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topLeading) {
+                if !isSourceSidebarVisible {
+                    sourceToggleButton
+                        .padding(18)
+                        .offset(z: 30)
+                        .transition(.opacity)
+                }
+            }
         }
+    }
+
+    private var sourceToggleButton: some View {
+        Button {
+            isSourceSidebarVisible = true
+        } label: {
+            Label("Sources", systemImage: "sidebar.left")
+        }
+        .buttonStyle(.bordered)
+        .help("Show sources")
     }
 }
 
@@ -280,6 +366,48 @@ private final class VisionCompanionStore: ObservableObject {
     }
 }
 
+private struct SpatialBackdrop: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.cyan.opacity(0.12),
+                    Color.indigo.opacity(0.08),
+                    Color.green.opacity(0.06)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct SpatialGlassPanel: ViewModifier {
+    let depth: CGFloat
+
+    func body(content: Content) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.white.opacity(0.05))
+                .offset(y: 10)
+                .offset(z: -depth)
+                .blur(radius: 10)
+
+            content
+                .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .shadow(color: .black.opacity(0.14), radius: 28, y: 18)
+                .offset(z: depth)
+        }
+    }
+}
+
+private extension View {
+    func spatialGlassPanel(depth: CGFloat) -> some View {
+        modifier(SpatialGlassPanel(depth: depth))
+    }
+}
+
 private struct HeaderPanel: View {
     let snapshot: HostigSnapshot
     let isRefreshing: Bool
@@ -312,7 +440,8 @@ private struct HeaderPanel: View {
                 .frame(height: 88)
         }
         .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .spatialGlassPanel(depth: 24)
+        .hoverEffect(.lift)
     }
 
     private var headerTitle: some View {
@@ -383,7 +512,8 @@ private struct VisionHostCard: View {
             }
         }
         .padding(18)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .spatialGlassPanel(depth: 16)
+        .hoverEffect(.lift)
     }
 
     private var hostTitle: some View {
@@ -425,6 +555,14 @@ private struct MiniLatencyGraph: View {
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(.secondary.opacity(0.08))
+                    .overlay(alignment: .top) {
+                        LinearGradient(
+                            colors: [.white.opacity(0.18), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
 
                 if renderedHistory.count > 1 {
                     Path { path in
@@ -448,6 +586,8 @@ private struct MiniLatencyGraph: View {
                         }
                     }
                     .stroke(.cyan.opacity(0.85), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    .shadow(color: .cyan.opacity(0.28), radius: 8)
+                    .offset(z: 8)
                 }
             }
         }
@@ -479,7 +619,8 @@ private struct SummaryPill: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .offset(z: 6)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -506,6 +647,9 @@ private struct GaugeTile: View {
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .offset(z: 8)
     }
 }
 
@@ -544,7 +688,8 @@ private struct StatChip: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .offset(z: 6)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
