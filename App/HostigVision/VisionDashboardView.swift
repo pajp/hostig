@@ -545,15 +545,19 @@ private struct VisionHostCard: View {
 private struct MiniLatencyGraph: View {
     let history: [PingHistoryPoint]
     private let maxRenderedPoints = 120
+    private let topLabelHeight: CGFloat = 12
+    private let bottomLabelHeight: CGFloat = 9
 
     var body: some View {
         GeometryReader { geometry in
             let renderedHistory = downsampledHistory
             let values = renderedHistory.compactMap(\.latencyMS)
             let maxValue = max(values.max() ?? 1, 1)
-            let inset: CGFloat = 7
+            let inset: CGFloat = 5
             let graphWidth = max(1, geometry.size.width - (inset * 2))
-            let graphHeight = max(1, geometry.size.height - (inset * 2))
+            let graphHeight = max(1, geometry.size.height - topLabelHeight - bottomLabelHeight - (inset * 2))
+            let plotTop = inset + topLabelHeight
+            let plotBottom = geometry.size.height - inset - bottomLabelHeight
 
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -567,6 +571,36 @@ private struct MiniLatencyGraph: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
+                VStack(spacing: 0) {
+                    HStack(alignment: .center, spacing: 6) {
+                        Capsule()
+                            .fill(.cyan.opacity(0.85))
+                            .frame(width: 14, height: 2)
+                        Text("Latency")
+                        Spacer(minLength: 8)
+                        Text("max \(Self.formatLatency(maxValue))")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                    Spacer(minLength: 0)
+
+                    HStack {
+                        Text(timeRangeLabel)
+                        Spacer(minLength: 8)
+                        Text("0 ms")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .offset(z: 9)
+
                 if renderedHistory.count > 1 {
                     Path { path in
                         var started = false
@@ -577,8 +611,8 @@ private struct MiniLatencyGraph: View {
                             }
 
                             let x = inset + (graphWidth * CGFloat(index) / CGFloat(max(renderedHistory.count - 1, 1)))
-                            let y = inset + graphHeight - ((CGFloat(latency) / CGFloat(maxValue)) * graphHeight)
-                            let cgPoint = CGPoint(x: x, y: max(inset, min(geometry.size.height - inset, y)))
+                            let y = plotTop + graphHeight - ((CGFloat(latency) / CGFloat(maxValue)) * graphHeight)
+                            let cgPoint = CGPoint(x: x, y: max(plotTop, min(plotBottom, y)))
 
                             if started {
                                 path.addLine(to: cgPoint)
@@ -603,6 +637,28 @@ private struct MiniLatencyGraph: View {
         return (0..<maxRenderedPoints).map { index in
             history[Int((Double(index) * stride).rounded())]
         }
+    }
+
+    private var timeRangeLabel: String {
+        guard let first = downsampledHistory.first?.timestamp,
+              let last = downsampledHistory.last?.timestamp else {
+            return "time"
+        }
+
+        let minutes = max(1, Int(last.timeIntervalSince(first) / 60))
+        if minutes < 60 {
+            return "~\(minutes)m ago"
+        }
+
+        let hours = max(1, Int(round(Double(minutes) / 60)))
+        return "~\(hours)h ago"
+    }
+
+    private static func formatLatency(_ value: Double) -> String {
+        if value < 10 {
+            return String(format: "%.1f ms", value)
+        }
+        return String(format: "%.0f ms", value)
     }
 }
 
