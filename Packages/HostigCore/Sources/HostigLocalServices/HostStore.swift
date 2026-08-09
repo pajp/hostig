@@ -220,22 +220,15 @@ public final class HostStore: NSObject, ObservableObject {
     private func startLatencyMonitor() {
         latencyMonitorTask = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-            while !Task.isCancelled {
-                let monitorHost = await self.latencyMonitorHost
-                do {
-                    let snapshot = try await PingService.sample(host: monitorHost, count: 1)
-                    await MainActor.run {
-                        self.latencyMonitorSnapshot = snapshot
-                        self.appendLatencyPoint(snapshot.latencyMS)
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.latencyMonitorSnapshot = PingSnapshot(latencyMS: nil, packetLossPercent: nil, lastUpdated: .now)
-                        self.appendLatencyPoint(nil)
-                    }
-                }
+            let monitorHost = await self.latencyMonitorHost
 
-                try? await Task.sleep(for: latencyMonitorInterval)
+            for await snapshot in PingService.continuousSamples(host: monitorHost, interval: latencyMonitorInterval) {
+                guard !Task.isCancelled else { break }
+
+                await MainActor.run {
+                    self.latencyMonitorSnapshot = snapshot
+                    self.appendLatencyPoint(snapshot.latencyMS)
+                }
             }
         }
     }

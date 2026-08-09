@@ -180,7 +180,7 @@ struct DashboardView: View {
                     SummaryPill(title: "Hosts", value: "\(store.hosts.count)")
                     SummaryPill(title: "Authed", value: "\(store.hosts.filter(\.hasAuthenticatedSSH).count)")
                     SummaryPill(title: "No SSH", value: "\(store.hosts.filter { !$0.hasAuthenticatedSSH }.count)")
-                    SummaryPill(title: "Vision PIN", value: linkServer.pairingPIN)
+                    SummaryPill(title: "Pairing PIN", value: linkServer.pairingPIN, revealsValueOnHover: true)
                 }
 
                 HStack(spacing: 10) {
@@ -373,22 +373,32 @@ private struct LatencyPanel: View {
             }
 
             HStack(alignment: .bottom, spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(snapshot?.latencyMS.map { String(format: "%.1f ms", $0) } ?? "n/a")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    Text("Current")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                LatencyStat(
+                    title: "Avg",
+                    value: snapshot?.latencyMS.map { String(format: "%.1f ms", $0) } ?? "n/a",
+                    prominent: true
+                )
+
+                LatencyStat(
+                    title: "Min",
+                    value: snapshot?.minLatencyMS.map { String(format: "%.1f ms", $0) } ?? "n/a"
+                )
+
+                LatencyStat(
+                    title: "Max",
+                    value: snapshot?.maxLatencyMS.map { String(format: "%.1f ms", $0) } ?? "n/a"
+                )
+
+                LatencyStat(
+                    title: "Std Dev",
+                    value: snapshot?.standardDeviationMS.map { String(format: "%.1f ms", $0) } ?? "n/a"
+                )
 
                 if let packetLoss = snapshot?.packetLossPercent {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String(format: "%.0f%%", packetLoss))
-                            .font(.title3.monospacedDigit().weight(.semibold))
-                        Text("Loss")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    LatencyStat(
+                        title: "Loss",
+                        value: String(format: "%.0f%%", packetLoss)
+                    )
                 }
             }
 
@@ -412,14 +422,30 @@ private struct LatencyPanel: View {
     }
 }
 
+private struct LatencyStat: View {
+    let title: String
+    let value: String
+    var prominent = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(prominent ? .system(size: 24, weight: .semibold, design: .rounded) : .title3.monospacedDigit().weight(.semibold))
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 struct MiniLatencyGraph: View {
     @Environment(\.colorScheme) private var colorScheme
     let history: [PingHistoryPoint]
-    private let maxRenderedPoints = 120
+    private let maxRenderedPoints = 400
 
     var body: some View {
         GeometryReader { geometry in
-            let renderedHistory = downsampledHistory
+            let renderedHistory = self.renderedHistory
             let values = renderedHistory.compactMap(\.latencyMS)
             let maxValue = max(values.max() ?? 1, 1)
             let inset: CGFloat = 7
@@ -460,13 +486,9 @@ struct MiniLatencyGraph: View {
         }
     }
 
-    private var downsampledHistory: [PingHistoryPoint] {
+    private var renderedHistory: [PingHistoryPoint] {
         guard history.count > maxRenderedPoints else { return history }
-
-        let stride = Double(history.count - 1) / Double(maxRenderedPoints - 1)
-        return (0..<maxRenderedPoints).map { index in
-            history[Int((Double(index) * stride).rounded())]
-        }
+        return Array(history.suffix(maxRenderedPoints))
     }
 }
 
@@ -498,25 +520,57 @@ private struct PingHostEditorSheet: View {
 
 private struct SummaryPill: View {
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
     let title: String
     let value: String
+    var revealsValueOnHover = false
 
     var body: some View {
         HStack(spacing: 8) {
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline.monospacedDigit().weight(.semibold))
-                .textSelection(.enabled)
+            valueText
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(pillFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.04), lineWidth: 1)
+                .strokeBorder(pillStroke, lineWidth: 1)
         )
+        .onHover { isHovering = $0 }
+        .accessibilityValue(accessibilityValue)
+        .help(revealsValueOnHover ? "Hover to reveal" : value)
+    }
+
+    private var displayValue: String {
+        guard revealsValueOnHover, !isHovering else { return value }
+        return String(repeating: "*", count: value.count)
+    }
+
+    private var accessibilityValue: String {
+        revealsValueOnHover && !isHovering ? "Hidden" : value
+    }
+
+    @ViewBuilder
+    private var valueText: some View {
+        let text = Text(displayValue)
+            .font(.headline.monospacedDigit().weight(.semibold))
+
+        if revealsValueOnHover && !isHovering {
+            text
+        } else {
+            text.textSelection(.enabled)
+        }
+    }
+
+    private var pillFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.72)
+    }
+
+    private var pillStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.04)
     }
 }
 

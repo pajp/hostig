@@ -113,11 +113,24 @@ public enum SSHState: Codable, Equatable, Sendable {
 
 public struct PingSnapshot: Codable, Equatable, Sendable {
     public var latencyMS: Double?
+    public var minLatencyMS: Double?
+    public var maxLatencyMS: Double?
+    public var standardDeviationMS: Double?
     public var packetLossPercent: Double?
     public var lastUpdated: Date
 
-    public init(latencyMS: Double?, packetLossPercent: Double?, lastUpdated: Date) {
+    public init(
+        latencyMS: Double?,
+        minLatencyMS: Double? = nil,
+        maxLatencyMS: Double? = nil,
+        standardDeviationMS: Double? = nil,
+        packetLossPercent: Double?,
+        lastUpdated: Date
+    ) {
         self.latencyMS = latencyMS
+        self.minLatencyMS = minLatencyMS
+        self.maxLatencyMS = maxLatencyMS
+        self.standardDeviationMS = standardDeviationMS
         self.packetLossPercent = packetLossPercent
         self.lastUpdated = lastUpdated
     }
