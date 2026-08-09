@@ -29,6 +29,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
     public var userCount: Int
     public var operatingSystem: String
     public var operatingSystemVersion: String
+    public var distributionDescription: String
     public var architecture: String
     public var lastUpdated: Date
 
@@ -42,6 +43,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
         userCount: Int,
         operatingSystem: String,
         operatingSystemVersion: String,
+        distributionDescription: String = "Unavailable",
         architecture: String = "Unavailable",
         lastUpdated: Date
     ) {
@@ -54,6 +56,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
         self.userCount = userCount
         self.operatingSystem = operatingSystem
         self.operatingSystemVersion = operatingSystemVersion
+        self.distributionDescription = distributionDescription
         self.architecture = architecture
         self.lastUpdated = lastUpdated
     }
@@ -68,6 +71,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
         case userCount
         case operatingSystem
         case operatingSystemVersion
+        case distributionDescription
         case architecture
         case lastUpdated
     }
@@ -83,6 +87,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
         userCount = try container.decode(Int.self, forKey: .userCount)
         operatingSystem = try container.decode(String.self, forKey: .operatingSystem)
         operatingSystemVersion = try container.decode(String.self, forKey: .operatingSystemVersion)
+        distributionDescription = try container.decodeIfPresent(String.self, forKey: .distributionDescription) ?? "Unavailable"
         architecture = try container.decodeIfPresent(String.self, forKey: .architecture) ?? "Unavailable"
         lastUpdated = try container.decode(Date.self, forKey: .lastUpdated)
     }
@@ -98,6 +103,7 @@ public struct HostMetrics: Codable, Equatable, Sendable {
         try container.encode(userCount, forKey: .userCount)
         try container.encode(operatingSystem, forKey: .operatingSystem)
         try container.encode(operatingSystemVersion, forKey: .operatingSystemVersion)
+        try container.encode(distributionDescription, forKey: .distributionDescription)
         try container.encode(architecture, forKey: .architecture)
         try container.encode(lastUpdated, forKey: .lastUpdated)
     }

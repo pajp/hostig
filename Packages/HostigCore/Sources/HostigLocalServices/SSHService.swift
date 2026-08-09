@@ -42,11 +42,18 @@ public struct SSHService: Sendable {
         os=$(uname -s 2>/dev/null || echo Unknown)
         architecture=$(uname -m 2>/dev/null || echo Unknown)
         os_version=""
+        distro_description=""
         if [ "$os" = "Darwin" ]; then
           os_version=$(sw_vers -productVersion 2>/dev/null || true)
         elif [ "$os" = "Linux" ]; then
+          if command -v lsb_release >/dev/null 2>&1; then
+            distro_description=$(lsb_release -d 2>/dev/null | sed 's/^Description:[[:space:]]*//')
+          fi
           if [ -r /etc/os-release ]; then
             os_version=$(awk -F= '/^VERSION_ID=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release)
+            if [ -z "$distro_description" ]; then
+              distro_description=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release)
+            fi
           fi
           if [ -z "$os_version" ]; then
             os_version=$(uname -r 2>/dev/null || true)
@@ -146,6 +153,7 @@ public struct SSHService: Sendable {
         fi
         printf 'os=%s\n' "$os"
         printf 'os_version=%s\n' "$os_version"
+        printf 'distro_description=%s\n' "$distro_description"
         printf 'architecture=%s\n' "$architecture"
         printf 'uptime=%s\n' "$uptime_text"
         printf 'load=%s\n' "$load"
@@ -180,6 +188,7 @@ public struct SSHService: Sendable {
             throw SSHServiceError.metricsFailed(SSHServiceError.malformedResponse.localizedDescription)
         }
         let osVersion = map["os_version"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let distroDescription = map["distro_description"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let architecture = map["architecture"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let diskParts = disk.split(separator: "|").map(String.init)
@@ -199,6 +208,7 @@ public struct SSHService: Sendable {
             userCount: users,
             operatingSystem: os,
             operatingSystemVersion: osVersion.isEmpty ? "Unavailable" : osVersion,
+            distributionDescription: distroDescription.isEmpty ? "Unavailable" : distroDescription,
             architecture: architecture.isEmpty ? "Unavailable" : architecture,
             lastUpdated: .now
         )

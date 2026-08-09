@@ -500,6 +500,9 @@ private struct VisionHostCard: View {
                         VStack(alignment: .leading, spacing: 10) {
                             DetailsRow(label: "OS", value: metrics.operatingSystem)
                             DetailsRow(label: "Version", value: metrics.operatingSystemVersion)
+                            if metrics.distributionDescription != "Unavailable" {
+                                DetailsRow(label: "Distro", value: metrics.distributionDescription)
+                            }
                             DetailsRow(label: "Arch", value: metrics.architecture)
                             DetailsRow(label: "Users", value: "\(metrics.userCount)")
                             DetailsRow(label: "Updated", value: metrics.lastUpdated.formatted(date: .omitted, time: .standard))
