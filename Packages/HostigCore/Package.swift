@@ -26,6 +26,10 @@ let package = Package(
         .target(
             name: "HostigNetworking",
             dependencies: ["HostigModels", "HostigLink"]
+        ),
+        .testTarget(
+            name: "HostigLocalServicesTests",
+            dependencies: ["HostigLocalServices"]
         )
     ]
 )

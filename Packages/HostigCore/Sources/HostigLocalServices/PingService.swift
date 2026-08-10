@@ -123,7 +123,7 @@ public enum PingService {
         return Double(String(text[range]).replacingOccurrences(of: "% packet loss", with: ""))
     }
 
-    private static func parseLatencyStats(from text: String) -> LatencyStats? {
+    static func parseLatencyStats(from text: String) -> LatencyStats? {
         let patterns = [
             #"round-trip min/avg/max/(?:stddev|mdev) = ([0-9.]+)/([0-9.]+)/([0-9.]+)/([0-9.]+|nan)"#,
             #"rtt min/avg/max/(?:mdev|stddev) = ([0-9.]+)/([0-9.]+)/([0-9.]+)/([0-9.]+|nan)"#
@@ -138,21 +138,28 @@ public enum PingService {
                 if
                     let components,
                     components.count == 4,
-                    let minimum = parseDoublePrefix(components[0]),
-                    let average = parseDoublePrefix(components[1]),
-                    let maximum = parseDoublePrefix(components[2])
+                    let minimum = parseLatency(components[0]),
+                    let average = parseLatency(components[1]),
+                    let maximum = parseLatency(components[2])
                 {
                     return LatencyStats(
                         minimum: minimum,
                         average: average,
                         maximum: maximum,
-                        standardDeviation: parseDoublePrefix(components[3]) ?? 0
+                        standardDeviation: parseLatency(components[3]) ?? 0
                     )
                 }
             }
         }
 
         return nil
+    }
+
+    private static func parseLatency(_ text: Substring) -> Double? {
+        guard let value = parseDoublePrefix(text), isReasonableLatency(value) else {
+            return nil
+        }
+        return value
     }
 
     private static func parseDoublePrefix(_ text: Substring) -> Double? {
@@ -167,31 +174,39 @@ public enum PingService {
         return Double(firstComponent)
     }
 
-    private struct LatencyStats {
+    static func isReasonableLatency(_ value: Double) -> Bool {
+        value.isFinite && value >= 0 && value <= 60_000
+    }
+
+    struct LatencyStats {
         var minimum: Double
         var average: Double
         var maximum: Double
         var standardDeviation: Double
     }
 
-    private actor PingAccumulator {
+    actor PingAccumulator {
         private var lineBuffer = ""
         private var receivedCount = 0
         private var minimumLatency: Double?
         private var maximumLatency: Double?
         private var meanLatency = 0.0
         private var sumOfSquaredDifferences = 0.0
+        private var firstSequence: Int?
         private var highestSequence = -1
         private var reportedTransmittedCount: Int?
         private var reportedReceivedCount: Int?
+        private var lastReceivedAt: Date?
 
-        func recordStandardOutput(_ text: String) {
+        private let maxReceiveGapBeforeReset: TimeInterval = 30
+
+        func recordStandardOutput(_ text: String, receivedAt: Date = .now) {
             lineBuffer.append(text)
 
             while let newlineRange = lineBuffer.range(of: "\n") {
                 let line = String(lineBuffer[..<newlineRange.lowerBound])
                 lineBuffer.removeSubrange(lineBuffer.startIndex...newlineRange.lowerBound)
-                recordLine(line)
+                recordLine(line, receivedAt: receivedAt)
             }
         }
 
@@ -216,8 +231,8 @@ public enum PingService {
                     0,
                     (1 - (Double(reportedReceivedCount) / Double(reportedTransmittedCount))) * 100
                 )
-            } else if highestSequence >= 0 {
-                let transmittedCount = highestSequence + 1
+            } else if let firstSequence, highestSequence >= firstSequence {
+                let transmittedCount = highestSequence - firstSequence + 1
                 packetLossPercent = max(0, (1 - (Double(receivedCount) / Double(transmittedCount))) * 100)
             } else {
                 packetLossPercent = nil
@@ -233,8 +248,13 @@ public enum PingService {
             )
         }
 
-        private func recordLine(_ line: String) {
-            guard let latency = value(after: "time=", in: line) else { return }
+        private func recordLine(_ line: String, receivedAt: Date) {
+            guard let latency = value(after: "time=", in: line), PingService.isReasonableLatency(latency) else { return }
+
+            if let lastReceivedAt, receivedAt.timeIntervalSince(lastReceivedAt) > maxReceiveGapBeforeReset {
+                reset()
+            }
+            lastReceivedAt = receivedAt
 
             receivedCount += 1
             minimumLatency = minimumLatency.map { min($0, latency) } ?? latency
@@ -245,8 +265,21 @@ public enum PingService {
             sumOfSquaredDifferences += delta * (latency - meanLatency)
 
             if let sequence = integerValue(after: "icmp_seq=", in: line) {
+                firstSequence = firstSequence ?? sequence
                 highestSequence = max(highestSequence, sequence)
             }
+        }
+
+        private func reset() {
+            receivedCount = 0
+            minimumLatency = nil
+            maximumLatency = nil
+            meanLatency = 0
+            sumOfSquaredDifferences = 0
+            firstSequence = nil
+            highestSequence = -1
+            reportedTransmittedCount = nil
+            reportedReceivedCount = nil
         }
 
         private func recordInfoLine(_ line: String) {
