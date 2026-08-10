@@ -176,6 +176,7 @@ struct VisionDashboardView: View {
                     LazyVGrid(columns: hostColumns, alignment: .leading, spacing: 12) {
                         ForEach(snapshot.hosts) { host in
                             VisionHostCard(host: host)
+                                .equatable()
                         }
                     }
                 }
@@ -324,29 +325,42 @@ private final class VisionCompanionStore: ObservableObject {
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                await self?.refreshIfReady()
+                await self?.refreshIfReady(showProgress: false)
             }
         }
     }
 
-    func refreshIfReady() async {
+    func refreshIfReady(showProgress: Bool = true) async {
         guard canRefresh else { return }
-        await refresh()
+        await refresh(showProgress: showProgress)
     }
 
-    func refresh() async {
+    func refresh(showProgress: Bool = true) async {
         guard let selectedSource else { return }
         lastSelectedSource = selectedSource
         let currentPIN = pin
         let sourceName = selectedSource.name
-        isRefreshing = true
+        if showProgress {
+            isRefreshing = true
+        }
         didAttemptRefresh = true
         errorMessage = nil
-        defer { isRefreshing = false }
+        defer {
+            if showProgress {
+                isRefreshing = false
+            }
+        }
 
         do {
             let transport = HostigTCPSnapshotTransport(identity: identity, pairingStore: pairingStore)
-            snapshot = try await transport.fetchSnapshot(from: selectedSource, pin: currentPIN)
+            let fetchedSnapshot = try await transport.fetchSnapshot(from: selectedSource, pin: currentPIN)
+            if snapshot?.hasSameDisplayContent(as: fetchedSnapshot) != true {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    snapshot = fetchedSnapshot
+                }
+            }
             rememberedSources = pairingStore.rememberedSources()
             pin = ""
         } catch {
@@ -408,6 +422,17 @@ private extension View {
     }
 }
 
+private extension HostigSnapshot {
+    func hasSameDisplayContent(as other: HostigSnapshot) -> Bool {
+        protocolVersion == other.protocolVersion &&
+        identity == other.identity &&
+        latencyMonitorHost == other.latencyMonitorHost &&
+        latencyMonitorSnapshot == other.latencyMonitorSnapshot &&
+        latencyHistory == other.latencyHistory &&
+        hosts == other.hosts
+    }
+}
+
 private struct HeaderPanel: View {
     let snapshot: HostigSnapshot
     let isRefreshing: Bool
@@ -464,7 +489,7 @@ private struct HeaderPanel: View {
     }
 }
 
-private struct VisionHostCard: View {
+private struct VisionHostCard: View, Equatable {
     let host: HostRecord
     private let statusColumns = [GridItem(.adaptive(minimum: 82), spacing: 8, alignment: .leading)]
     private let gaugeColumns = [GridItem(.adaptive(minimum: 86, maximum: 120), spacing: 14, alignment: .leading)]
@@ -558,6 +583,7 @@ private struct MiniLatencyGraph: View {
             let graphHeight = max(1, geometry.size.height - topLabelHeight - bottomLabelHeight - (inset * 2))
             let plotTop = inset + topLabelHeight
             let plotBottom = geometry.size.height - inset - bottomLabelHeight
+            let rangeLabel = timeRangeLabel(for: renderedHistory)
 
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -588,7 +614,7 @@ private struct MiniLatencyGraph: View {
                     Spacer(minLength: 0)
 
                     HStack {
-                        Text(timeRangeLabel)
+                        Text(rangeLabel)
                         Spacer(minLength: 8)
                         Text("0 ms")
                     }
@@ -623,7 +649,6 @@ private struct MiniLatencyGraph: View {
                         }
                     }
                     .stroke(.cyan.opacity(0.85), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .shadow(color: .cyan.opacity(0.28), radius: 8)
                     .offset(z: 8)
                 }
             }
@@ -639,9 +664,9 @@ private struct MiniLatencyGraph: View {
         }
     }
 
-    private var timeRangeLabel: String {
-        guard let first = downsampledHistory.first?.timestamp,
-              let last = downsampledHistory.last?.timestamp else {
+    private func timeRangeLabel(for renderedHistory: [PingHistoryPoint]) -> String {
+        guard let first = renderedHistory.first?.timestamp,
+              let last = renderedHistory.last?.timestamp else {
             return "time"
         }
 
