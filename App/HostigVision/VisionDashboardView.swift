@@ -5,7 +5,7 @@ import HostigNetworking
 import SwiftUI
 
 struct VisionDashboardView: View {
-    @StateObject private var store = VisionCompanionStore()
+    @ObservedObject var store: VisionCompanionStore
     @State private var isSourceSidebarVisible = true
     private let hostColumns = [GridItem(.adaptive(minimum: 360), spacing: 12, alignment: .top)]
 
@@ -174,9 +174,11 @@ struct VisionDashboardView: View {
                     }
 
                     LazyVGrid(columns: hostColumns, alignment: .leading, spacing: 12) {
-                        ForEach(snapshot.hosts) { host in
+                        ForEach(snapshot.hosts.filter { !store.detachedHostIDs.contains($0.id) }) { host in
                             VisionHostCard(host: host)
-                                .equatable()
+                                .onOpenInNewWindow {
+                                    store.detachHost(host.id)
+                                }
                         }
                     }
                 }
@@ -216,7 +218,7 @@ struct VisionDashboardView: View {
 }
 
 @MainActor
-private final class VisionCompanionStore: ObservableObject {
+final class VisionCompanionStore: ObservableObject {
     @Published var sources: [HostigDiscoveredSource] = []
     @Published var selectedSourceID: String?
     @Published var pin = ""
@@ -224,6 +226,7 @@ private final class VisionCompanionStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isRefreshing = false
     @Published var didAttemptRefresh = false
+    @Published private(set) var detachedHostIDs: Set<UUID> = []
 
     private let browser = HostigBonjourSourceBrowser()
     private let pairingStore = HostigLinkPairingStore(role: .vision)
@@ -359,6 +362,7 @@ private final class VisionCompanionStore: ObservableObject {
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
                     snapshot = fetchedSnapshot
+                    detachedHostIDs.formIntersection(fetchedSnapshot.hosts.map(\.id))
                 }
             }
             rememberedSources = pairingStore.rememberedSources()
@@ -375,8 +379,62 @@ private final class VisionCompanionStore: ObservableObject {
         return pairingStore.keyData(for: rememberedSource.keyID) != nil
     }
 
+    func detachHost(_ id: UUID) {
+        detachedHostIDs.insert(id)
+    }
+
+    func returnHost(_ id: UUID) {
+        detachedHostIDs.remove(id)
+    }
+
     deinit {
         refreshTask?.cancel()
+    }
+}
+
+struct VisionHostWindow: View {
+    let hostID: UUID?
+    @ObservedObject var store: VisionCompanionStore
+
+    var body: some View {
+        Group {
+            if let host {
+                ScrollView {
+                    VisionHostCard(host: host, showsDetachButton: false)
+                        .padding(18)
+                }
+                .scrollClipDisabled()
+                .background {
+                    SpatialBackdrop()
+                }
+            } else {
+                ContentUnavailableView(
+                    "Host Unavailable",
+                    systemImage: "server.rack",
+                    description: Text("Refresh the dashboard to load the latest host snapshot.")
+                )
+                .padding(28)
+                .spatialGlassPanel(depth: 20)
+                .frame(minWidth: 360, minHeight: 420)
+                .background {
+                    SpatialBackdrop()
+                }
+            }
+        }
+        .task {
+            store.start()
+            await store.refreshIfReady(showProgress: false)
+        }
+        .onDisappear {
+            if let hostID {
+                store.returnHost(hostID)
+            }
+        }
+    }
+
+    private var host: HostRecord? {
+        guard let hostID else { return nil }
+        return store.snapshot?.hosts.first { $0.id == hostID }
     }
 }
 
@@ -489,8 +547,12 @@ private struct HeaderPanel: View {
     }
 }
 
-private struct VisionHostCard: View, Equatable {
+private struct VisionHostCard: View {
+    @Environment(\.openWindow) private var openWindow
+
     let host: HostRecord
+    var showsDetachButton = true
+    var openInNewWindow: () -> Void = {}
     private let statusColumns = [GridItem(.adaptive(minimum: 82), spacing: 8, alignment: .leading)]
     private let gaugeColumns = [GridItem(.adaptive(minimum: 86, maximum: 120), spacing: 14, alignment: .leading)]
     private let detailsColumns = [GridItem(.adaptive(minimum: 165), spacing: 18, alignment: .leading)]
@@ -498,7 +560,7 @@ private struct VisionHostCard: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 10) {
-                hostTitle
+                hostHeader
                 LazyVGrid(columns: statusColumns, alignment: .leading, spacing: 8) {
                     StatusBadge(state: host.sshState)
                     StatChip(title: "Latency", value: host.ping?.latencyMS.map { String(format: "%.1f ms", $0) } ?? "n/a")
@@ -542,6 +604,20 @@ private struct VisionHostCard: View, Equatable {
         .padding(18)
         .spatialGlassPanel(depth: 16)
         .hoverEffect(.lift)
+        .accessibilityAction(named: "Open in New Window") {
+            openHostWindow()
+        }
+    }
+
+    private var hostHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
+            hostTitle
+            Spacer(minLength: 12)
+            if showsDetachButton {
+                detachButton
+                    .offset(z: 14)
+            }
+        }
     }
 
     private var hostTitle: some View {
@@ -556,6 +632,18 @@ private struct VisionHostCard: View, Equatable {
         }
     }
 
+    private var detachButton: some View {
+        Button {
+            openHostWindow()
+        } label: {
+            Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled")
+                .accessibilityLabel("Open in New Window")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .contentShape(Rectangle())
+    }
+
     private var sshErrorText: String {
         if case .metricsUnavailable(let reason) = host.sshState {
             return reason
@@ -564,6 +652,19 @@ private struct VisionHostCard: View, Equatable {
             return reason
         }
         return "SSH metrics unavailable. Ping continues even when login fails."
+    }
+
+    private func openHostWindow() {
+        openInNewWindow()
+        openWindow(id: HostigVisionWindowID.host, value: host.id)
+    }
+}
+
+private extension VisionHostCard {
+    func onOpenInNewWindow(_ action: @escaping () -> Void) -> Self {
+        var copy = self
+        copy.openInNewWindow = action
+        return copy
     }
 }
 

@@ -28,5 +28,10 @@
 	<string></string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>HostigVision discovers Hostig Macs and receives encrypted snapshots on your local network.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
