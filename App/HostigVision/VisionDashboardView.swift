@@ -529,11 +529,17 @@ private struct HeaderPanel: View {
 
     private var headerTitle: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(snapshot.identity.deviceName)
+            Text("Latency Monitor")
                 .font(.largeTitle.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-            Text("Updated \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))")
+            Text(snapshot.latencyMonitorHost)
+                .font(.headline.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .textSelection(.enabled)
+            Text("\(snapshot.identity.deviceName) updated \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))")
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
