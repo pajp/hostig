@@ -7,6 +7,7 @@ import HostigNetworking
 struct HostigApp: App {
     @StateObject private var store = HostStore()
     @StateObject private var linkServer = HostigLinkSourceServer()
+    @StateObject private var reversePusher = HostigReverseSnapshotPusher()
     @StateObject private var mainWindowBridge = MainWindowBridge()
     private let statusBarController = StatusBarController()
 
@@ -15,6 +16,7 @@ struct HostigApp: App {
             DashboardView(
                 store: store,
                 linkServer: linkServer,
+                reversePusher: reversePusher,
                 mainWindowBridge: mainWindowBridge,
                 statusBarController: statusBarController
             )

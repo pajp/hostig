@@ -93,11 +93,36 @@ struct VisionDashboardView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!store.canRefresh)
 
+                Button("Disconnect Pairing", role: .destructive) {
+                    store.disconnectSelectedSourcePairing()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!store.hasRememberedPairingForSelectedSource)
+
                 if let errorMessage = store.errorMessage {
                     Text(errorMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
+            .offset(z: 8)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Reverse Connect PIN")
+                    .font(.headline)
+                Text(store.reversePairingPIN)
+                    .font(.title2.monospacedDigit().weight(.semibold))
+                    .textSelection(.enabled)
+                Text(store.reverseStatusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("Disconnect Reverse Pairing", role: .destructive) {
+                    store.disconnectReversePairing()
+                }
+                .buttonStyle(.bordered)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
@@ -226,19 +251,34 @@ final class VisionCompanionStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isRefreshing = false
     @Published var didAttemptRefresh = false
+    @Published var reversePairingPIN = ""
+    @Published var reverseConnectedSourceName: String?
+    @Published var reverseReceiverErrorMessage: String?
     @Published private(set) var detachedHostIDs: Set<UUID> = []
 
     private let browser = HostigBonjourSourceBrowser()
-    private let pairingStore = HostigLinkPairingStore(role: .vision)
-    private let identity = HostigLinkIdentity.persisted(
-        storageKey: "nu.dll.hostig.vision.appInstanceID",
-        deviceName: "Hostig Vision",
-        platform: "visionOS"
-    )
+    private let pairingStore: HostigLinkPairingStore
+    private let identity: HostigLinkIdentity
+    private let reverseReceiver: HostigReverseSnapshotReceiver
     private var sourceUpdates: AnyCancellable?
+    private var reverseUpdates: Set<AnyCancellable> = []
     private var refreshTask: Task<Void, Never>?
     private var lastSelectedSource: HostigDiscoveredSource?
     private var rememberedSources: [String: HostigRememberedSource] = [:]
+
+    init() {
+        let identity = HostigLinkIdentity.persisted(
+            storageKey: "nu.dll.hostig.vision.appInstanceID",
+            deviceName: "Hostig Vision",
+            platform: "visionOS"
+        )
+        let pairingStore = HostigLinkPairingStore(role: .vision)
+        let reversePairingStore = HostigLinkPairingStore(role: .visionReverse)
+        self.identity = identity
+        self.pairingStore = pairingStore
+        self.reverseReceiver = HostigReverseSnapshotReceiver(identity: identity, pairingStore: reversePairingStore)
+        self.reversePairingPIN = reverseReceiver.pairingPIN
+    }
 
     var canRefresh: Bool {
         guard let selectedSource, !isRefreshing else { return false }
@@ -291,6 +331,16 @@ final class VisionCompanionStore: ObservableObject {
         return "Tap Refresh to load the current host snapshot."
     }
 
+    var reverseStatusText: String {
+        if let reverseReceiverErrorMessage {
+            return reverseReceiverErrorMessage
+        }
+        if let reverseConnectedSourceName {
+            return "Receiving snapshots from \(reverseConnectedSourceName)."
+        }
+        return "Use this PIN from the Mac reverse connection UI."
+    }
+
     private var selectedSource: HostigDiscoveredSource? {
         if let selectedSourceID, let source = sources.first(where: { $0.id == selectedSourceID }) {
             return source
@@ -325,6 +375,7 @@ final class VisionCompanionStore: ObservableObject {
             }
         }
         browser.start()
+        startReverseReceiver()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
@@ -372,6 +423,20 @@ final class VisionCompanionStore: ObservableObject {
         }
     }
 
+    func disconnectSelectedSourcePairing() {
+        guard let selectedSource else { return }
+        pairingStore.removeRememberedSource(endpointDescription: selectedSource.endpointDescription)
+        rememberedSources = pairingStore.rememberedSources()
+        pin = ""
+    }
+
+    func disconnectReversePairing() {
+        reverseReceiver.disconnectPairing()
+        reverseConnectedSourceName = nil
+        reverseReceiverErrorMessage = nil
+        reversePairingPIN = reverseReceiver.pairingPIN
+    }
+
     private func hasRememberedPairing(for source: HostigDiscoveredSource) -> Bool {
         guard let rememberedSource = rememberedSources[source.endpointDescription] else {
             return false
@@ -385,6 +450,44 @@ final class VisionCompanionStore: ObservableObject {
 
     func returnHost(_ id: UUID) {
         detachedHostIDs.remove(id)
+    }
+
+    private func startReverseReceiver() {
+        if reverseUpdates.isEmpty {
+            reverseReceiver.$pairingPIN
+                .sink { [weak self] pin in
+                    self?.reversePairingPIN = pin
+                }
+                .store(in: &reverseUpdates)
+
+            reverseReceiver.$connectedSourceName
+                .sink { [weak self] sourceName in
+                    self?.reverseConnectedSourceName = sourceName
+                }
+                .store(in: &reverseUpdates)
+
+            reverseReceiver.$errorMessage
+                .sink { [weak self] message in
+                    self?.reverseReceiverErrorMessage = message
+                }
+                .store(in: &reverseUpdates)
+
+            reverseReceiver.snapshotHandler = { [weak self] fetchedSnapshot in
+                guard let self else { return }
+                if self.snapshot?.hasSameDisplayContent(as: fetchedSnapshot) != true {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        self.snapshot = fetchedSnapshot
+                        self.detachedHostIDs.formIntersection(fetchedSnapshot.hosts.map(\.id))
+                    }
+                }
+                self.didAttemptRefresh = true
+                self.errorMessage = nil
+            }
+        }
+
+        reverseReceiver.start()
     }
 
     deinit {

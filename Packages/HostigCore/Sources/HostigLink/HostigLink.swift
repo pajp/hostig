@@ -3,6 +3,7 @@ import HostigModels
 
 public enum HostigLinkService {
     public static let bonjourType = "_hostig._tcp"
+    public static let reverseBonjourType = "_hostig-reverse._tcp"
     public static let bonjourDomain = "local."
     public static let snapshotPath = "/snapshot"
     public static let protocolVersion = 1

@@ -23,6 +23,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_hostig._tcp</string>
+		<string>_hostig-reverse._tcp</string>
 	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>

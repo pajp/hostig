@@ -7,6 +7,7 @@ import HostigNetworking
 struct DashboardView: View {
     @ObservedObject var store: HostStore
     @ObservedObject var linkServer: HostigLinkSourceServer
+    @ObservedObject var reversePusher: HostigReverseSnapshotPusher
     @ObservedObject var mainWindowBridge: MainWindowBridge
     let statusBarController: StatusBarController
     @State private var passwordPromptHost: HostRecord?
@@ -17,6 +18,7 @@ struct DashboardView: View {
     @State private var showingLatencyHostEditor = false
     @State private var manualHostDrafts: [ManualHostEntry] = []
     @State private var showingHostEditor = false
+    @State private var showingReverseConnection = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -128,18 +130,38 @@ struct DashboardView: View {
             )
             .frame(minWidth: 780, minHeight: 520)
         }
+        .sheet(isPresented: $showingReverseConnection) {
+            ReverseConnectionSheet(
+                reversePusher: reversePusher,
+                onConnect: {
+                    reversePusher.connect(provider: store, identity: macLinkIdentity)
+                },
+                onDisconnect: {
+                    reversePusher.disconnectPairing()
+                },
+                onClose: {
+                    showingReverseConnection = false
+                }
+            )
+            .frame(width: 520, height: 520)
+        }
         .background(WindowAccessor(mainWindowBridge: mainWindowBridge))
         .task {
             statusBarController.configureIfNeeded(store: store, mainWindowBridge: mainWindowBridge)
             linkServer.start(
                 provider: store,
-                identity: .persisted(
-                    storageKey: "nu.dll.hostig.mac.appInstanceID",
-                    deviceName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
-                    platform: "macOS"
-                )
+                identity: macLinkIdentity
             )
+            reversePusher.startBrowsing()
         }
+    }
+
+    private var macLinkIdentity: HostigLinkIdentity {
+        .persisted(
+            storageKey: "nu.dll.hostig.mac.appInstanceID",
+            deviceName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+            platform: "macOS"
+        )
     }
 
     private func requestReboot(_ selectedHost: HostRecord) {
@@ -184,6 +206,16 @@ struct DashboardView: View {
                 }
 
                 HStack(spacing: 10) {
+                    Button(reversePusher.isConnected ? "Reverse Connected" : "Reverse Connect") {
+                        showingReverseConnection = true
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Forget Pairings", role: .destructive) {
+                        linkServer.disconnectPairings()
+                    }
+                    .buttonStyle(.bordered)
+
                     Button("Add/Remove Hosts") {
                         manualHostDrafts = store.manualHosts
                         showingHostEditor = true
@@ -346,6 +378,103 @@ private struct ManualHostRow: View {
         }
         .padding(12)
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct ReverseConnectionSheet: View {
+    @ObservedObject var reversePusher: HostigReverseSnapshotPusher
+    let onConnect: () -> Void
+    let onDisconnect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Reverse Connect")
+                        .font(.title3.weight(.semibold))
+                    Text("Send snapshots outbound to a visionOS device when inbound Mac connections are blocked.")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done", action: onClose)
+                    .buttonStyle(.bordered)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("visionOS Devices")
+                    .font(.headline)
+
+                if reversePusher.receivers.isEmpty {
+                    Text("No reverse receivers found. Open Hostig on visionOS and use the PIN shown there.")
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 12)
+                } else {
+                    List(reversePusher.receivers) { receiver in
+                        Button {
+                            reversePusher.selectedReceiverID = receiver.id
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(receiver.name)
+                                        .font(.body.weight(.medium))
+                                    Text(receiver.endpointDescription)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if reversePusher.selectedReceiverID == receiver.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .frame(minHeight: 170)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Pairing PIN")
+                        .font(.headline)
+                    if reversePusher.hasRememberedPairingForSelectedReceiver {
+                        Text("Remembered")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                TextField(reversePusher.hasRememberedPairingForSelectedReceiver ? "Optional" : "000000", text: $reversePusher.pin)
+                    .textFieldStyle(.roundedBorder)
+                    .monospacedDigit()
+                    .onChange(of: reversePusher.pin) { _, newValue in
+                        reversePusher.pin = String(newValue.filter(\.isNumber).prefix(6))
+                    }
+            }
+
+            if let errorMessage = reversePusher.errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Spacer()
+
+            HStack {
+                Button("Disconnect Pairing", role: .destructive, action: onDisconnect)
+                    .buttonStyle(.bordered)
+                    .disabled(reversePusher.selectedReceiver == nil && !reversePusher.isConnected)
+
+                Spacer()
+
+                Button(reversePusher.isConnecting ? "Connecting" : "Connect", action: onConnect)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!reversePusher.canConnect)
+            }
+        }
+        .padding(24)
     }
 }
 

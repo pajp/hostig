@@ -83,6 +83,8 @@ public enum HostigNetworkingError: LocalizedError {
 public enum HostigPairingRole: String, Sendable {
     case mac
     case vision
+    case macReverse
+    case visionReverse
 }
 
 public struct HostigRememberedSource: Codable, Equatable, Sendable {
@@ -129,6 +131,27 @@ public final class HostigLinkPairingStore: @unchecked Sendable {
         }
     }
 
+    public func removeRememberedSource(endpointDescription: String) {
+        var sources = rememberedSources()
+        guard let source = sources.removeValue(forKey: endpointDescription) else { return }
+        deleteKeyData(for: source.keyID)
+        if let data = try? JSONEncoder().encode(sources) {
+            defaults.set(data, forKey: rememberedSourcesKey)
+        }
+        if lastSourceEndpointDescription == endpointDescription {
+            lastSourceEndpointDescription = nil
+        }
+    }
+
+    public func removeAllPairings() {
+        for source in rememberedSources().values {
+            deleteKeyData(for: source.keyID)
+        }
+        defaults.removeObject(forKey: rememberedSourcesKey)
+        defaults.removeObject(forKey: lastSourceKey)
+        SecItemDelete(keychainServiceQuery() as CFDictionary)
+    }
+
     public var lastSourceEndpointDescription: String? {
         get { defaults.string(forKey: lastSourceKey) }
         set { defaults.set(newValue, forKey: lastSourceKey) }
@@ -173,6 +196,17 @@ public final class HostigLinkPairingStore: @unchecked Sendable {
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: account
         ]
+    }
+
+    private func keychainServiceQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService
+        ]
+    }
+
+    private func deleteKeyData(for keyID: String) {
+        SecItemDelete(keychainBaseQuery(account: keyID) as CFDictionary)
     }
 }
 
@@ -250,6 +284,240 @@ public final class HostigBonjourSourceBrowser: ObservableObject, HostigSourceDis
             transportKind: .tcp,
             endpoint: result.endpoint
         )
+    }
+}
+
+@MainActor
+public final class HostigReverseReceiverBrowser: ObservableObject, HostigSourceDiscovery {
+    @Published public private(set) var sources: [HostigDiscoveredSource] = []
+
+    private var browser: NWBrowser?
+    private var restartTask: Task<Void, Never>?
+    private let queue = DispatchQueue(label: "local.hostig.link.reverse-browser")
+
+    public init() {}
+
+    public func start() {
+        guard browser == nil else { return }
+
+        let browser = NWBrowser(
+            for: .bonjour(type: HostigLinkService.reverseBonjourType, domain: HostigLinkService.bonjourDomain),
+            using: .tcp
+        )
+
+        browser.browseResultsChangedHandler = { [weak self] results, changes in
+            let mappedSources = results.compactMap(Self.source(from:))
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            linkLogger.info("Mac reverse Bonjour results changed: \(mappedSources.count, privacy: .public) receiver(s), changes \(changes.count, privacy: .public)")
+            Task { @MainActor in
+                self?.sources = mappedSources
+            }
+        }
+
+        browser.stateUpdateHandler = { [weak self] state in
+            linkLogger.info("Mac reverse Bonjour browser state: \(String(describing: state), privacy: .public)")
+            if case .failed = state {
+                Task { @MainActor in
+                    self?.restartAfterFailure()
+                }
+            }
+        }
+
+        self.browser = browser
+        browser.start(queue: queue)
+    }
+
+    public func stop() {
+        restartTask?.cancel()
+        restartTask = nil
+        browser?.cancel()
+        browser = nil
+        sources = []
+    }
+
+    private func restartAfterFailure() {
+        browser?.cancel()
+        browser = nil
+        sources = []
+        restartTask?.cancel()
+        restartTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.start()
+        }
+    }
+
+    nonisolated private static func source(from result: NWBrowser.Result) -> HostigDiscoveredSource? {
+        guard case .service(let name, let type, let domain, _) = result.endpoint else {
+            return nil
+        }
+
+        let displayName = name.isEmpty ? "Hostig Vision" : name
+        return HostigDiscoveredSource(
+            name: displayName,
+            endpointDescription: "\(name).\(type).\(domain)",
+            transportKind: .tcp,
+            endpoint: result.endpoint
+        )
+    }
+}
+
+@MainActor
+public final class HostigReverseSnapshotReceiver: ObservableObject {
+    @Published public private(set) var pairingPIN: String
+    @Published public private(set) var isRunning = false
+    @Published public private(set) var connectedSourceName: String?
+    @Published public private(set) var errorMessage: String?
+
+    public var snapshotHandler: (@MainActor @Sendable (HostigSnapshot) -> Void)?
+
+    private let queue = DispatchQueue(label: "local.hostig.link.reverse-receiver")
+    private var listener: NWListener?
+    private let pairingStore: HostigLinkPairingStore
+    private let identity: HostigLinkIdentity
+
+    public init(
+        identity: HostigLinkIdentity,
+        pairingPIN: String? = nil,
+        pairingStore: HostigLinkPairingStore = HostigLinkPairingStore(role: .visionReverse)
+    ) {
+        self.identity = identity
+        self.pairingPIN = pairingPIN ?? HostigPIN.generate()
+        self.pairingStore = pairingStore
+    }
+
+    public func rotatePIN() {
+        pairingPIN = HostigPIN.generate()
+    }
+
+    public func start() {
+        guard listener == nil else { return }
+
+        do {
+            let listener = try NWListener(using: .tcp)
+            listener.service = NWListener.Service(
+                name: identity.deviceName,
+                type: HostigLinkService.reverseBonjourType,
+                domain: HostigLinkService.bonjourDomain
+            )
+            listener.serviceRegistrationUpdateHandler = { update in
+                linkLogger.info("Vision reverse Bonjour registration update: \(String(describing: update), privacy: .public)")
+            }
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.accept(connection)
+            }
+            listener.stateUpdateHandler = { [weak self] state in
+                Task { @MainActor in
+                    switch state {
+                    case .ready:
+                        linkLogger.info("Vision reverse listener ready on port \(listener.port?.rawValue ?? 0, privacy: .public)")
+                        self?.isRunning = true
+                        self?.errorMessage = nil
+                    case .failed(let error):
+                        linkLogger.error("Vision reverse listener failed: \(error.localizedDescription, privacy: .public)")
+                        self?.isRunning = false
+                        self?.errorMessage = error.localizedDescription
+                        self?.listener?.cancel()
+                        self?.listener = nil
+                    case .cancelled:
+                        self?.isRunning = false
+                        self?.listener = nil
+                    case .waiting(let error):
+                        linkLogger.error("Vision reverse listener waiting: \(error.localizedDescription, privacy: .public)")
+                    default:
+                        break
+                    }
+                }
+            }
+            self.listener = listener
+            listener.start(queue: queue)
+        } catch {
+            isRunning = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    public func stop() {
+        listener?.cancel()
+        listener = nil
+        isRunning = false
+    }
+
+    public func disconnectPairing() {
+        pairingStore.removeAllPairings()
+        connectedSourceName = nil
+        rotatePIN()
+    }
+
+    private nonisolated func accept(_ connection: NWConnection) {
+        linkLogger.info("Vision reverse accepted connection from \(connection.endpoint.debugDescription, privacy: .public)")
+        connection.start(queue: queue)
+        Task { @MainActor in
+            await self.handle(connection)
+        }
+    }
+
+    private func handle(_ connection: NWConnection) async {
+        defer { connection.cancel() }
+
+        do {
+            let encryptedPush = try await connection.receiveFrame(timeoutNanoseconds: HostigLinkFrame.timeoutNanoseconds)
+            let authentication = try authenticate(encryptedPush)
+            guard let push = authentication.message else {
+                throw HostigNetworkingError.connectionFailed("Received an empty Hostig reverse push.")
+            }
+            guard push.protocolVersion == HostigLinkService.protocolVersion else {
+                throw HostigNetworkingError.protocolMismatch
+            }
+            guard push.kind == .reverseSnapshotPush, let snapshot = push.snapshot else {
+                throw HostigNetworkingError.missingSnapshot
+            }
+
+            if case .pin(let pin) = authentication.storage, !pin.isEmpty {
+                let credential = HostigPairingKeys.credential(
+                    pin: pin,
+                    requesterID: identity.appInstanceID,
+                    sourceID: snapshot.identity.appInstanceID
+                )
+                try pairingStore.saveKeyData(credential.keyData, keyID: credential.keyID)
+                pairingStore.saveRememberedSource(
+                    HostigRememberedSource(
+                        endpointDescription: snapshot.identity.appInstanceID.uuidString,
+                        name: snapshot.identity.deviceName,
+                        sourceAppInstanceID: snapshot.identity.appInstanceID,
+                        keyID: credential.keyID
+                    )
+                )
+                linkLogger.info("Vision reverse saved remembered pairing key \(credential.keyID, privacy: .public) for source \(snapshot.identity.deviceName, privacy: .public)")
+            }
+
+            connectedSourceName = snapshot.identity.deviceName
+            snapshotHandler?(snapshot)
+
+            let ack = HostigLinkMessage(kind: .reverseSnapshotAck, requestID: push.requestID, requester: identity)
+            let encryptedAck = try authentication.seal(ack)
+            try await connection.sendFrame(encryptedAck)
+        } catch {
+            errorMessage = error.localizedDescription
+            linkLogger.error("Vision reverse could not handle push from \(connection.endpoint.debugDescription, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            let response = HostigLinkMessage(kind: .error, requestID: UUID(), error: error.localizedDescription)
+            if let encryptedResponse = try? HostigSecureEnvelope.seal(response, pin: pairingPIN) {
+                try? await connection.sendFrame(encryptedResponse)
+            }
+        }
+    }
+
+    private func authenticate(_ data: Data) throws -> HostigLinkAuthentication {
+        if
+            let keyID = try HostigSecureEnvelope.keyID(in: data),
+            let keyData = pairingStore.keyData(for: keyID)
+        {
+            let message = try HostigSecureEnvelope.open(data, keyData: keyData)
+            linkLogger.info("Vision reverse authenticated push with remembered key \(keyID, privacy: .public)")
+            return HostigLinkAuthentication(message: message, keyData: keyData, keyID: keyID)
+        }
+
+        let message = try HostigSecureEnvelope.open(data, pin: pairingPIN)
+        return HostigLinkAuthentication(message: message, pin: pairingPIN)
     }
 }
 
@@ -332,6 +600,11 @@ public final class HostigLinkSourceServer: ObservableObject {
         listener?.cancel()
         listener = nil
         isRunning = false
+    }
+
+    public func disconnectPairings() {
+        pairingStore.removeAllPairings()
+        rotatePIN()
     }
 
     private nonisolated func accept(_ connection: NWConnection) {
@@ -488,6 +761,200 @@ public struct HostigTCPSnapshotTransport: HostigSnapshotTransport {
     }
 }
 
+@MainActor
+public final class HostigReverseSnapshotPusher: ObservableObject {
+    @Published public private(set) var receivers: [HostigDiscoveredSource] = []
+    @Published public var selectedReceiverID: String?
+    @Published public var pin = ""
+    @Published public private(set) var isConnecting = false
+    @Published public private(set) var connectedReceiverID: String?
+    @Published public private(set) var errorMessage: String?
+
+    private let browser = HostigReverseReceiverBrowser()
+    private let pairingStore: HostigLinkPairingStore
+    private let queue = DispatchQueue(label: "local.hostig.link.reverse-pusher")
+    private let timeoutNanoseconds: UInt64
+    private var browserUpdates: AnyCancellable?
+    private var pushTask: Task<Void, Never>?
+    private var rememberedReceivers: [String: HostigRememberedSource] = [:]
+
+    public init(
+        pairingStore: HostigLinkPairingStore = HostigLinkPairingStore(role: .macReverse),
+        timeoutNanoseconds: UInt64 = 10_000_000_000
+    ) {
+        self.pairingStore = pairingStore
+        self.timeoutNanoseconds = timeoutNanoseconds
+    }
+
+    public var selectedReceiver: HostigDiscoveredSource? {
+        guard let selectedReceiverID else { return nil }
+        return receivers.first { $0.id == selectedReceiverID }
+    }
+
+    public var hasRememberedPairingForSelectedReceiver: Bool {
+        selectedReceiver.map(hasRememberedPairing(for:)) ?? false
+    }
+
+    public var canConnect: Bool {
+        guard selectedReceiver != nil, !isConnecting else { return false }
+        return pin.count == HostigLinkService.pairingPINLength || hasRememberedPairingForSelectedReceiver
+    }
+
+    public var isConnected: Bool {
+        connectedReceiverID != nil
+    }
+
+    public func startBrowsing() {
+        guard browserUpdates == nil else { return }
+
+        rememberedReceivers = pairingStore.rememberedSources()
+        browserUpdates = browser.$sources.sink { [weak self] sources in
+            guard let self else { return }
+            self.receivers = sources
+            if self.selectedReceiverID == nil {
+                let rememberedEndpoint = self.pairingStore.lastSourceEndpointDescription
+                let rememberedReceiver = rememberedEndpoint.flatMap { endpoint in
+                    sources.first { $0.endpointDescription == endpoint }
+                }
+                self.selectedReceiverID = (rememberedReceiver ?? sources.first)?.id
+            }
+        }
+        browser.start()
+    }
+
+    public func connect(provider: any HostigSnapshotProvider, identity: HostigLinkIdentity) {
+        guard let receiver = selectedReceiver, canConnect else { return }
+
+        pushTask?.cancel()
+        connectedReceiverID = receiver.id
+        errorMessage = nil
+        pushTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.pushSnapshot(to: receiver, pin: self.pin, provider: provider, identity: identity)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    public func disconnectPairing() {
+        if let receiver = selectedReceiver {
+            pairingStore.removeRememberedSource(endpointDescription: receiver.endpointDescription)
+        } else {
+            pairingStore.removeAllPairings()
+        }
+        rememberedReceivers = pairingStore.rememberedSources()
+        connectedReceiverID = nil
+        pushTask?.cancel()
+        pushTask = nil
+        pin = ""
+    }
+
+    public func disconnect() {
+        connectedReceiverID = nil
+        pushTask?.cancel()
+        pushTask = nil
+    }
+
+    private func pushSnapshot(
+        to receiver: HostigDiscoveredSource,
+        pin: String,
+        provider: any HostigSnapshotProvider,
+        identity: HostigLinkIdentity
+    ) async {
+        isConnecting = true
+        defer { isConnecting = false }
+
+        do {
+            let snapshot = await provider.currentSnapshot(identity: identity)
+            try await send(snapshot: snapshot, to: receiver, pin: pin, sourceIdentity: identity)
+            rememberedReceivers = pairingStore.rememberedSources()
+            self.pin = ""
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not send to \(receiver.name): \(error.localizedDescription)"
+            linkLogger.error("Mac reverse push failed for \(receiver.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func send(
+        snapshot: HostigSnapshot,
+        to receiver: HostigDiscoveredSource,
+        pin: String,
+        sourceIdentity: HostigLinkIdentity
+    ) async throws {
+        let connection = NWConnection(to: receiver.endpoint, using: .tcp)
+        defer { connection.cancel() }
+
+        linkLogger.info("Mac reverse connecting to \(receiver.name, privacy: .public) at \(receiver.endpoint.debugDescription, privacy: .public)")
+        try await connection.waitUntilReady(on: queue, timeoutNanoseconds: timeoutNanoseconds)
+
+        let request = HostigLinkMessage(kind: .reverseSnapshotPush, requestID: UUID(), snapshot: snapshot)
+        let authentication = try authentication(for: receiver, pin: pin)
+        let encryptedRequest = try authentication.seal(request)
+        try await connection.sendFrame(encryptedRequest)
+
+        let encryptedAck = try await connection.receiveFrame(timeoutNanoseconds: timeoutNanoseconds)
+        let ack = try authentication.open(encryptedAck)
+        guard ack.protocolVersion == HostigLinkService.protocolVersion else {
+            throw HostigNetworkingError.protocolMismatch
+        }
+        guard ack.kind == .reverseSnapshotAck, let receiverIdentity = ack.requester else {
+            throw HostigNetworkingError.connectionFailed("The receiver did not acknowledge the snapshot.")
+        }
+
+        if case .pin(let pin) = authentication.storage, !pin.isEmpty {
+            let credential = HostigPairingKeys.credential(
+                pin: pin,
+                requesterID: receiverIdentity.appInstanceID,
+                sourceID: sourceIdentity.appInstanceID
+            )
+            try pairingStore.saveKeyData(credential.keyData, keyID: credential.keyID)
+            pairingStore.saveRememberedSource(
+                HostigRememberedSource(
+                    endpointDescription: receiver.endpointDescription,
+                    name: receiver.name,
+                    sourceAppInstanceID: receiverIdentity.appInstanceID,
+                    keyID: credential.keyID
+                )
+            )
+            pairingStore.lastSourceEndpointDescription = receiver.endpointDescription
+            linkLogger.info("Mac reverse saved remembered pairing key \(credential.keyID, privacy: .public) for receiver \(receiver.name, privacy: .public)")
+        } else {
+            pairingStore.lastSourceEndpointDescription = receiver.endpointDescription
+        }
+    }
+
+    private func authentication(for receiver: HostigDiscoveredSource, pin: String) throws -> HostigLinkAuthentication {
+        if pin.count == HostigLinkService.pairingPINLength {
+            try HostigPIN.validate(pin)
+            return HostigLinkAuthentication(message: nil, pin: pin)
+        }
+
+        if
+            let rememberedReceiver = rememberedReceivers[receiver.endpointDescription],
+            let keyData = pairingStore.keyData(for: rememberedReceiver.keyID)
+        {
+            linkLogger.info("Mac reverse using remembered pairing key \(rememberedReceiver.keyID, privacy: .public) for \(receiver.name, privacy: .public)")
+            return HostigLinkAuthentication(message: nil, keyData: keyData, keyID: rememberedReceiver.keyID)
+        }
+
+        try HostigPIN.validate(pin)
+        return HostigLinkAuthentication(message: nil, pin: pin)
+    }
+
+    private func hasRememberedPairing(for receiver: HostigDiscoveredSource) -> Bool {
+        guard let rememberedReceiver = rememberedReceivers[receiver.endpointDescription] else {
+            return false
+        }
+        return pairingStore.keyData(for: rememberedReceiver.keyID) != nil
+    }
+
+    deinit {
+        pushTask?.cancel()
+    }
+}
+
 struct HostigPIN {
     static func generate() -> String {
         String(format: "%06d", Int.random(in: 0...999_999))
@@ -504,6 +971,8 @@ private struct HostigLinkMessage: Codable {
     enum Kind: String, Codable {
         case snapshotRequest
         case snapshotResponse
+        case reverseSnapshotPush
+        case reverseSnapshotAck
         case error
     }
 
