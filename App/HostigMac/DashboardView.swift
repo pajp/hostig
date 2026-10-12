@@ -5,6 +5,7 @@ import HostigModels
 import HostigNetworking
 
 struct DashboardView: View {
+    @Environment(\.openSettings) private var openSettings
     @ObservedObject var store: HostStore
     @ObservedObject var linkServer: HostigLinkSourceServer
     @ObservedObject var reversePusher: HostigReverseSnapshotPusher
@@ -14,11 +15,6 @@ struct DashboardView: View {
     @State private var sudoPassword = ""
     @State private var rebootConfirmationHost: HostRecord?
     @State private var rebootAlert: RebootAlert?
-    @State private var latencyHostDraft = ""
-    @State private var manualHostDrafts: [ManualHostEntry] = []
-    @State private var menuBarGraphDrafts: Set<String> = []
-    @State private var showingHostEditor = false
-    @State private var showingReverseConnection = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -107,37 +103,6 @@ struct DashboardView: View {
         } message: { host in
             Text("This will run `sudo reboot` on \(host.hostname).")
         }
-        .sheet(isPresented: $showingHostEditor) {
-            HostListEditorSheet(
-                manualHosts: $manualHostDrafts,
-                latencyHost: $latencyHostDraft,
-                menuBarGraphKeys: $menuBarGraphDrafts,
-                discoveredHosts: store.hosts.filter { $0.source == .bonjour },
-                onCancel: { showingHostEditor = false },
-                onSave: {
-                    store.replaceManualHosts(manualHostDrafts)
-                    store.updateLatencyMonitorHost(latencyHostDraft)
-                    store.updateMenuBarGraphHosts(menuBarGraphDrafts)
-                    showingHostEditor = false
-                }
-            )
-            .frame(minWidth: 780, minHeight: 520)
-        }
-        .sheet(isPresented: $showingReverseConnection) {
-            ReverseConnectionSheet(
-                reversePusher: reversePusher,
-                onConnect: {
-                    reversePusher.connect(provider: store, identity: macLinkIdentity)
-                },
-                onDisconnect: {
-                    reversePusher.disconnectPairing()
-                },
-                onClose: {
-                    showingReverseConnection = false
-                }
-            )
-            .frame(width: 520, height: 520)
-        }
         .background(WindowAccessor(mainWindowBridge: mainWindowBridge))
         .task {
             statusBarController.configureIfNeeded(store: store, mainWindowBridge: mainWindowBridge)
@@ -180,10 +145,7 @@ struct DashboardView: View {
             LatencyPanel(
                 host: store.latencyMonitorHost,
                 snapshot: store.latencyMonitorSnapshot,
-                history: store.latencyHistory,
-                onChangeHost: {
-                    openHostSettings()
-                }
+                history: store.latencyHistory
             )
             .frame(maxWidth: 520)
 
@@ -198,17 +160,7 @@ struct DashboardView: View {
                 }
 
                 HStack(spacing: 10) {
-                    Button(reversePusher.isConnected ? "Reverse Connected" : "Reverse Connect") {
-                        showingReverseConnection = true
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Forget Pairings", role: .destructive) {
-                        linkServer.disconnectPairings()
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Host settings…", action: openHostSettings)
+                    Button("Settings…") { openSettings() }
                     .buttonStyle(.bordered)
 
                     Button(store.discoveryActive ? "Pause Discovery" : "Resume Discovery") {
@@ -228,13 +180,6 @@ struct DashboardView: View {
         .padding(.bottom, 10)
     }
 
-    private func openHostSettings() {
-        manualHostDrafts = store.manualHosts
-        latencyHostDraft = store.latencyMonitorHost
-        menuBarGraphDrafts = store.menuBarGraphHostKeys
-        showingHostEditor = true
-    }
-
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "bonjour")
@@ -252,138 +197,191 @@ struct DashboardView: View {
     }
 }
 
-private struct HostListEditorSheet: View {
-    @Binding var manualHosts: [ManualHostEntry]
-    @Binding var latencyHost: String
-    @Binding var menuBarGraphKeys: Set<String>
-    let discoveredHosts: [HostRecord]
-    let onCancel: () -> Void
-    let onSave: () -> Void
+struct HostigSettingsView: View {
+    @ObservedObject var store: HostStore
+    @ObservedObject var linkServer: HostigLinkSourceServer
+    @ObservedObject var reversePusher: HostigReverseSnapshotPusher
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Host Settings")
-                .font(.title3.weight(.semibold))
+        TabView {
+            MonitoringSettingsTab(store: store)
+                .tabItem { Label("Monitoring", systemImage: "waveform.path") }
+            HostsSettingsTab(store: store)
+                .tabItem { Label("Hosts", systemImage: "server.rack") }
+            ConnectionsSettingsTab(store: store, linkServer: linkServer, reversePusher: reversePusher)
+                .tabItem { Label("Connections", systemImage: "network") }
+        }
+        .frame(width: 760, height: 520)
+    }
+}
 
-            Text("Choose which ping graphs appear in the menu bar. Bonjour-discovered hosts remain automatic and read-only.")
+private struct MonitoringSettingsTab: View {
+    @ObservedObject var store: HostStore
+    @State private var hostDraft = ""
+    @State private var hasLoadedHostDraft = false
+
+    var body: some View {
+        Form {
+            Section("Latency Monitor") {
+                HStack {
+                    TextField("Host", text: $hostDraft)
+                        .onSubmit(saveHost)
+                    Button("Set Host", action: saveHost)
+                        .disabled(hostDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hostDraft == store.latencyMonitorHost)
+                }
+                Toggle("Show latency monitor graph in menu bar", isOn: Binding(
+                    get: { store.showsMenuBarGraph(for: HostStore.latencyMonitorGraphKey) },
+                    set: { store.setMenuBarGraphVisible($0, for: HostStore.latencyMonitorGraphKey) }
+                ))
+            }
+
+            Section("Menu Bar Graph Scale") {
+                Toggle("Use the same scale for all visible graphs", isOn: Binding(
+                    get: { store.menuBarGraphsUseSharedScale },
+                    set: { store.setMenuBarGraphsUseSharedScale($0) }
+                ))
+                Text("When enabled, every graph uses 0 ms at the bottom and the highest recent latency across visible hosts at the top. Max and min labels still show each host’s own values.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            if !hasLoadedHostDraft {
+                hostDraft = store.latencyMonitorHost
+                hasLoadedHostDraft = true
+            }
+        }
+    }
+
+    private func saveHost() {
+        store.updateLatencyMonitorHost(hostDraft)
+        hostDraft = store.latencyMonitorHost
+    }
+}
+
+private struct HostsSettingsTab: View {
+    @ObservedObject var store: HostStore
+    @State private var manualHosts: [ManualHostEntry] = []
+    @State private var selectedManualGraphIDs: Set<UUID> = []
+    @State private var hasLoadedDrafts = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Bonjour hosts are discovered automatically. Add or edit manual SSH hosts below.")
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Latency Monitor")
-                    .font(.headline)
-                HStack(spacing: 12) {
-                    TextField("Host", text: $latencyHost)
-                        .textFieldStyle(.roundedBorder)
-                    menuBarGraphToggle(for: HostStore.latencyMonitorGraphKey)
-                }
-            }
-
-            if !discoveredHosts.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Bonjour Hosts")
-                        .font(.headline)
-
-                    ForEach(discoveredHosts) { host in
-                        HStack(spacing: 12) {
-                            Text(host.displayName)
-                                .font(.body.weight(.medium))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(host.hostname)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("\(host.port)")
-                                .monospacedDigit()
-                                .frame(width: 56, alignment: .trailing)
-                            menuBarGraphToggle(for: HostStore.menuBarGraphKey(for: host))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if !discoveredHosts.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Bonjour Hosts").font(.headline)
+                            ForEach(discoveredHosts) { host in
+                                HStack(spacing: 12) {
+                                    Text(host.displayName)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text(host.hostname)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("\(host.port)")
+                                        .monospacedDigit()
+                                        .frame(width: 56, alignment: .trailing)
+                                    Toggle("Menu bar graph", isOn: graphBinding(for: HostStore.menuBarGraphKey(for: host)))
+                                        .labelsHidden()
+                                        .frame(width: 108)
+                                }
+                                .padding(10)
+                            }
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
-                }
-            }
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Manual Hosts")
-                        .font(.headline)
-                    Spacer()
-                    Button("Add Host") {
-                        manualHosts.append(ManualHostEntry())
-                    }
-                    .buttonStyle(.bordered)
-                }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Manual Hosts").font(.headline)
+                            Spacer()
+                            Button("Add Host") { manualHosts.append(ManualHostEntry()) }
+                        }
 
-                HStack(spacing: 12) {
-                    Text("Name")
+                        HStack(spacing: 12) {
+                            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
+                            Text("Hostname").frame(maxWidth: .infinity, alignment: .leading)
+                            Text("Port").frame(width: 72, alignment: .leading)
+                            Text("Menu bar graph").frame(width: 108)
+                            Color.clear.frame(width: 60, height: 1)
+                        }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Hostname")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Port")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 72, alignment: .leading)
-                    Text("Menu bar graph")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 108, alignment: .center)
-                    Color.clear.frame(width: 60, height: 1)
-                }
 
-                ScrollView {
-                    VStack(spacing: 10) {
                         if manualHosts.isEmpty {
                             Text("No manual hosts yet.")
                                 .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 18)
                         } else {
                             ForEach($manualHosts) { $host in
                                 ManualHostRow(host: $host, showsMenuBarGraph: Binding(
-                                    get: { menuBarGraphKeys.contains("manual-\(host.id.uuidString)") },
+                                    get: { selectedManualGraphIDs.contains(host.id) },
                                     set: { visible in
-                                        let key = "manual-\(host.id.uuidString)"
-                                        if visible { menuBarGraphKeys.insert(key) }
-                                        else { menuBarGraphKeys.remove(key) }
+                                        if visible { selectedManualGraphIDs.insert(host.id) }
+                                        else { selectedManualGraphIDs.remove(host.id) }
                                     }
                                 )) {
                                     manualHosts.removeAll { $0.id == host.id }
+                                    selectedManualGraphIDs.remove(host.id)
                                 }
                             }
                         }
                     }
-                    .padding(.vertical, 2)
                 }
-                .frame(maxHeight: .infinity)
             }
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.bordered)
-                Button("Save", action: onSave)
+                Button("Revert") { loadDrafts() }
+                    .disabled(!hasChanges)
+                Button("Save Host Changes") { saveHosts() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(latencyHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!hasChanges)
             }
         }
-        .padding(24)
+        .padding(20)
+        .onAppear {
+            if !hasLoadedDrafts {
+                loadDrafts()
+                hasLoadedDrafts = true
+            }
+        }
     }
 
-    private func menuBarGraphToggle(for key: String) -> some View {
-        Toggle("Menu bar graph", isOn: Binding(
-            get: { menuBarGraphKeys.contains(key) },
-            set: { visible in
-                if visible { menuBarGraphKeys.insert(key) }
-                else { menuBarGraphKeys.remove(key) }
-            }
-        ))
-        .labelsHidden()
-        .help("Show ping graph in menu bar")
-        .frame(width: 108)
+    private var discoveredHosts: [HostRecord] {
+        store.hosts.filter { $0.source == .bonjour }
+    }
+
+    private var storedManualGraphIDs: Set<UUID> {
+        Set(store.manualHosts.filter { store.showsMenuBarGraph(for: "manual-\($0.id.uuidString)") }.map(\.id))
+    }
+
+    private var hasChanges: Bool {
+        manualHosts != store.manualHosts || selectedManualGraphIDs != storedManualGraphIDs
+    }
+
+    private func graphBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { store.showsMenuBarGraph(for: key) },
+            set: { store.setMenuBarGraphVisible($0, for: key) }
+        )
+    }
+
+    private func loadDrafts() {
+        manualHosts = store.manualHosts
+        selectedManualGraphIDs = storedManualGraphIDs
+    }
+
+    private func saveHosts() {
+        store.replaceManualHosts(manualHosts)
+        let otherKeys = store.menuBarGraphHostKeys.filter { !$0.hasPrefix("manual-") }
+        let manualKeys = selectedManualGraphIDs.intersection(Set(manualHosts.map(\.id)))
+            .map { "manual-\($0.uuidString)" }
+        store.updateMenuBarGraphHosts(Set(otherKeys).union(manualKeys))
+        loadDrafts()
     }
 }
 
@@ -421,24 +419,20 @@ private struct ManualHostRow: View {
     }
 }
 
-private struct ReverseConnectionSheet: View {
+private struct ConnectionsSettingsTab: View {
+    @ObservedObject var store: HostStore
+    @ObservedObject var linkServer: HostigLinkSourceServer
     @ObservedObject var reversePusher: HostigReverseSnapshotPusher
-    let onConnect: () -> Void
-    let onDisconnect: () -> Void
-    let onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Reverse Connect")
+                    Text("Reverse Connection")
                         .font(.title3.weight(.semibold))
                     Text("Send snapshots outbound to a visionOS device when inbound Mac connections are blocked.")
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button("Done", action: onClose)
-                    .buttonStyle(.bordered)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -503,18 +497,45 @@ private struct ReverseConnectionSheet: View {
             Spacer()
 
             HStack {
-                Button("Disconnect Pairing", role: .destructive, action: onDisconnect)
+                Button("Disconnect Reverse Pairing", role: .destructive) {
+                    reversePusher.disconnectPairing()
+                }
                     .buttonStyle(.bordered)
                     .disabled(reversePusher.selectedReceiver == nil && !reversePusher.isConnected)
 
                 Spacer()
 
-                Button(reversePusher.isConnecting ? "Connecting" : "Connect", action: onConnect)
+                Button(reversePusher.isConnecting ? "Connecting" : "Connect") {
+                    reversePusher.connect(provider: store, identity: macLinkIdentity)
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(!reversePusher.canConnect)
             }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Incoming Pairings").font(.headline)
+                    Text("Forget devices paired with this Mac.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Forget Pairings", role: .destructive) {
+                    linkServer.disconnectPairings()
+                }
+            }
         }
         .padding(24)
+    }
+
+    private var macLinkIdentity: HostigLinkIdentity {
+        .persisted(
+            storageKey: "nu.dll.hostig.mac.appInstanceID",
+            deviceName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+            platform: "macOS"
+        )
     }
 }
 
@@ -523,7 +544,6 @@ private struct LatencyPanel: View {
     let host: String
     let snapshot: PingSnapshot?
     let history: [PingHistoryPoint]
-    let onChangeHost: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -537,8 +557,6 @@ private struct LatencyPanel: View {
                         .textSelection(.enabled)
                 }
                 Spacer()
-                Button("Change Host", action: onChangeHost)
-                    .buttonStyle(.bordered)
             }
 
             HStack(alignment: .bottom, spacing: 14) {

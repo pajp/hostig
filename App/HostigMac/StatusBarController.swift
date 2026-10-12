@@ -74,10 +74,11 @@ final class StatusBarController: NSObject {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        graphSubscription = Publishers.Merge3(
+        graphSubscription = Publishers.Merge4(
             store.$hosts.map { _ in () },
             store.$latencyHistory.map { _ in () },
-            store.$menuBarGraphHostKeys.map { _ in () }
+            store.$menuBarGraphHostKeys.map { _ in () },
+            store.$menuBarGraphsUseSharedScale.map { _ in () }
         )
         .sink { [weak self, weak store] _ in
             DispatchQueue.main.async {
@@ -150,6 +151,11 @@ final class StatusBarController: NSObject {
         let entries = graphs.map { name, history in
             (name: String(name.prefix(14)), history: history)
         }
+        let sharedMaximum = store.menuBarGraphsUseSharedScale
+            ? graphs.flatMap { $0.1.suffix(60).compactMap(\.latencyMS) }
+                .filter { $0.isFinite && $0 >= 0 }
+                .max()
+            : nil
         let widths = entries.map { ($0.name as NSString).size(withAttributes: labelAttributes).width + graphWidth + 14 }
         let width = widths.reduce(0, +) + 8
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
@@ -158,7 +164,7 @@ final class StatusBarController: NSObject {
                 let labelWidth = (entry.name as NSString).size(withAttributes: labelAttributes).width
                 (entry.name as NSString).draw(at: NSPoint(x: x, y: 4), withAttributes: labelAttributes)
                 x += labelWidth + 5
-                Self.drawSparkline(entry.history, in: NSRect(x: x, y: 1, width: graphWidth, height: 18))
+                Self.drawSparkline(entry.history, in: NSRect(x: x, y: 1, width: graphWidth, height: 18), sharedMaximum: sharedMaximum)
                 x += graphWidth + 9
                 if index < entries.count - 1 {
                     NSColor.separatorColor.setStroke()
@@ -176,12 +182,12 @@ final class StatusBarController: NSObject {
         button.toolTip = graphs.map(\.0).joined(separator: " · ")
     }
 
-    private static func drawSparkline(_ history: [PingHistoryPoint], in rect: NSRect) {
+    private static func drawSparkline(_ history: [PingHistoryPoint], in rect: NSRect, sharedMaximum: Double?) {
         let points = Array(history.suffix(60))
         let values = points.compactMap(\.latencyMS).filter { $0.isFinite && $0 >= 0 }
         guard let minimum = values.min(), let observedMaximum = values.max() else { return }
         let plotRect = NSRect(x: rect.minX, y: rect.minY, width: rect.width - 56, height: rect.height)
-        let maximum = max(observedMaximum, 1)
+        let maximum = max(sharedMaximum ?? observedMaximum, 1)
         let path = NSBezierPath()
         path.lineWidth = 1.5
         var started = false

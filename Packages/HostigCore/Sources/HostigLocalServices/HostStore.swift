@@ -13,6 +13,7 @@ public final class HostStore: NSObject, ObservableObject {
     @Published public private(set) var latencyMonitorSnapshot: PingSnapshot?
     @Published public private(set) var latencyHistory: [PingHistoryPoint] = []
     @Published public private(set) var menuBarGraphHostKeys: Set<String> = ["latency-monitor"]
+    @Published public private(set) var menuBarGraphsUseSharedScale = false
 
     private let scanner = BonjourScanner()
     private var hostIndexByService: [String: UUID] = [:]
@@ -26,6 +27,7 @@ public final class HostStore: NSObject, ObservableObject {
     private let manualHostsDefaultsKey = "Hostig.manualHosts"
     private let latencyMonitorHostDefaultsKey = "Hostig.latencyMonitorHost"
     private let menuBarGraphDefaultsKey = "Hostig.menuBarGraphHostKeys"
+    private let menuBarSharedScaleDefaultsKey = "Hostig.menuBarGraphsUseSharedScale"
 
     public static let latencyMonitorGraphKey = "latency-monitor"
 
@@ -45,6 +47,7 @@ public final class HostStore: NSObject, ObservableObject {
         if let savedKeys = UserDefaults.standard.stringArray(forKey: menuBarGraphDefaultsKey) {
             menuBarGraphHostKeys = Set(savedKeys)
         }
+        menuBarGraphsUseSharedScale = UserDefaults.standard.bool(forKey: menuBarSharedScaleDefaultsKey)
         loadManualHosts()
         scanner.delegate = self
         scanner.start()
@@ -90,6 +93,18 @@ public final class HostStore: NSObject, ObservableObject {
     public func updateMenuBarGraphHosts(_ keys: Set<String>) {
         menuBarGraphHostKeys = keys
         UserDefaults.standard.set(menuBarGraphHostKeys.sorted(), forKey: menuBarGraphDefaultsKey)
+    }
+
+    public func setMenuBarGraphVisible(_ visible: Bool, for key: String) {
+        var keys = menuBarGraphHostKeys
+        if visible { keys.insert(key) }
+        else { keys.remove(key) }
+        updateMenuBarGraphHosts(keys)
+    }
+
+    public func setMenuBarGraphsUseSharedScale(_ enabled: Bool) {
+        menuBarGraphsUseSharedScale = enabled
+        UserDefaults.standard.set(enabled, forKey: menuBarSharedScaleDefaultsKey)
     }
 
     public func requestReboot(for id: UUID) async -> RebootAttemptResult {

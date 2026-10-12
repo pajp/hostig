@@ -24,5 +24,9 @@ struct HostigApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 760)
+
+        Settings {
+            HostigSettingsView(store: store, linkServer: linkServer, reversePusher: reversePusher)
+        }
     }
 }
