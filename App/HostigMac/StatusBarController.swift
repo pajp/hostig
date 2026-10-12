@@ -140,7 +140,7 @@ final class StatusBarController: NSObject {
             return
         }
 
-        let graphWidth: CGFloat = 54
+        let graphWidth: CGFloat = 102
         let height: CGFloat = 20
         let labelFont = NSFont.systemFont(ofSize: 10, weight: .medium)
         let labelAttributes: [NSAttributedString.Key: Any] = [
@@ -158,7 +158,7 @@ final class StatusBarController: NSObject {
                 let labelWidth = (entry.name as NSString).size(withAttributes: labelAttributes).width
                 (entry.name as NSString).draw(at: NSPoint(x: x, y: 4), withAttributes: labelAttributes)
                 x += labelWidth + 5
-                Self.drawSparkline(entry.history, in: NSRect(x: x, y: 3, width: graphWidth, height: 14))
+                Self.drawSparkline(entry.history, in: NSRect(x: x, y: 1, width: graphWidth, height: 18))
                 x += graphWidth + 9
                 if index < entries.count - 1 {
                     NSColor.separatorColor.setStroke()
@@ -178,13 +178,14 @@ final class StatusBarController: NSObject {
 
     private static func drawSparkline(_ history: [PingHistoryPoint], in rect: NSRect) {
         let points = Array(history.suffix(60))
-        guard !points.isEmpty else { return }
-        let maximum = max(points.compactMap(\.latencyMS).max() ?? 1, 1)
+        let values = points.compactMap(\.latencyMS).filter { $0.isFinite && $0 >= 0 }
+        guard let minimum = values.min(), let observedMaximum = values.max() else { return }
+        let maximum = max(observedMaximum, 1)
         let path = NSBezierPath()
         path.lineWidth = 1.5
         var started = false
         for (index, point) in points.enumerated() {
-            guard let latency = point.latencyMS, latency.isFinite else {
+            guard let latency = point.latencyMS, latency.isFinite, latency >= 0 else {
                 started = false
                 continue
             }
@@ -196,6 +197,33 @@ final class StatusBarController: NSObject {
         }
         NSColor.systemTeal.setStroke()
         path.stroke()
+
+        drawGraphValue("max \(formatGraphValue(observedMaximum))", atTop: true, in: rect)
+        drawGraphValue("min \(formatGraphValue(minimum))", atTop: false, in: rect)
+    }
+
+    private static func formatGraphValue(_ milliseconds: Double) -> String {
+        milliseconds < 10
+            ? String(format: "%.1fms", milliseconds)
+            : String(format: "%.0fms", milliseconds)
+    }
+
+    private static func drawGraphValue(_ value: String, atTop: Bool, in rect: NSRect) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .medium),
+            .foregroundColor: NSColor.labelColor
+        ]
+        let text = value as NSString
+        let size = text.size(withAttributes: attributes)
+        let labelRect = NSRect(
+            x: rect.maxX - size.width - 4,
+            y: atTop ? rect.maxY - 9 : rect.minY,
+            width: size.width + 4,
+            height: 9
+        )
+        NSColor.controlBackgroundColor.withAlphaComponent(0.88).setFill()
+        NSBezierPath(roundedRect: labelRect, xRadius: 2, yRadius: 2).fill()
+        text.draw(at: NSPoint(x: labelRect.minX + 2, y: labelRect.minY), withAttributes: attributes)
     }
 
     private func openPanel() {
