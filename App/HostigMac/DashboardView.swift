@@ -15,8 +15,8 @@ struct DashboardView: View {
     @State private var rebootConfirmationHost: HostRecord?
     @State private var rebootAlert: RebootAlert?
     @State private var latencyHostDraft = ""
-    @State private var showingLatencyHostEditor = false
     @State private var manualHostDrafts: [ManualHostEntry] = []
+    @State private var menuBarGraphDrafts: Set<String> = []
     @State private var showingHostEditor = false
     @State private var showingReverseConnection = false
 
@@ -107,24 +107,17 @@ struct DashboardView: View {
         } message: { host in
             Text("This will run `sudo reboot` on \(host.hostname).")
         }
-        .sheet(isPresented: $showingLatencyHostEditor) {
-            PingHostEditorSheet(
-                host: $latencyHostDraft,
-                onCancel: { showingLatencyHostEditor = false },
-                onSave: {
-                    store.updateLatencyMonitorHost(latencyHostDraft)
-                    showingLatencyHostEditor = false
-                }
-            )
-            .frame(width: 420)
-        }
         .sheet(isPresented: $showingHostEditor) {
             HostListEditorSheet(
                 manualHosts: $manualHostDrafts,
+                latencyHost: $latencyHostDraft,
+                menuBarGraphKeys: $menuBarGraphDrafts,
                 discoveredHosts: store.hosts.filter { $0.source == .bonjour },
                 onCancel: { showingHostEditor = false },
                 onSave: {
                     store.replaceManualHosts(manualHostDrafts)
+                    store.updateLatencyMonitorHost(latencyHostDraft)
+                    store.updateMenuBarGraphHosts(menuBarGraphDrafts)
                     showingHostEditor = false
                 }
             )
@@ -189,8 +182,7 @@ struct DashboardView: View {
                 snapshot: store.latencyMonitorSnapshot,
                 history: store.latencyHistory,
                 onChangeHost: {
-                    latencyHostDraft = store.latencyMonitorHost
-                    showingLatencyHostEditor = true
+                    openHostSettings()
                 }
             )
             .frame(maxWidth: 520)
@@ -216,10 +208,7 @@ struct DashboardView: View {
                     }
                     .buttonStyle(.bordered)
 
-                    Button("Add/Remove Hosts") {
-                        manualHostDrafts = store.manualHosts
-                        showingHostEditor = true
-                    }
+                    Button("Host settings…", action: openHostSettings)
                     .buttonStyle(.bordered)
 
                     Button(store.discoveryActive ? "Pause Discovery" : "Resume Discovery") {
@@ -237,6 +226,13 @@ struct DashboardView: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 10)
+    }
+
+    private func openHostSettings() {
+        manualHostDrafts = store.manualHosts
+        latencyHostDraft = store.latencyMonitorHost
+        menuBarGraphDrafts = store.menuBarGraphHostKeys
+        showingHostEditor = true
     }
 
     private var emptyState: some View {
@@ -258,17 +254,29 @@ struct DashboardView: View {
 
 private struct HostListEditorSheet: View {
     @Binding var manualHosts: [ManualHostEntry]
+    @Binding var latencyHost: String
+    @Binding var menuBarGraphKeys: Set<String>
     let discoveredHosts: [HostRecord]
     let onCancel: () -> Void
     let onSave: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Host List")
+            Text("Host Settings")
                 .font(.title3.weight(.semibold))
 
-            Text("Manage non-Bonjour hosts here. Bonjour-discovered hosts remain automatic and read-only.")
+            Text("Choose which ping graphs appear in the menu bar. Bonjour-discovered hosts remain automatic and read-only.")
                 .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Latency Monitor")
+                    .font(.headline)
+                HStack(spacing: 12) {
+                    TextField("Host", text: $latencyHost)
+                        .textFieldStyle(.roundedBorder)
+                    menuBarGraphToggle(for: HostStore.latencyMonitorGraphKey)
+                }
+            }
 
             if !discoveredHosts.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
@@ -286,6 +294,7 @@ private struct HostListEditorSheet: View {
                             Text("\(host.port)")
                                 .monospacedDigit()
                                 .frame(width: 56, alignment: .trailing)
+                            menuBarGraphToggle(for: HostStore.menuBarGraphKey(for: host))
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -318,6 +327,10 @@ private struct HostListEditorSheet: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 72, alignment: .leading)
+                    Text("Menu bar graph")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 108, alignment: .center)
                     Color.clear.frame(width: 60, height: 1)
                 }
 
@@ -330,7 +343,14 @@ private struct HostListEditorSheet: View {
                                 .padding(.vertical, 18)
                         } else {
                             ForEach($manualHosts) { $host in
-                                ManualHostRow(host: $host) {
+                                ManualHostRow(host: $host, showsMenuBarGraph: Binding(
+                                    get: { menuBarGraphKeys.contains("manual-\(host.id.uuidString)") },
+                                    set: { visible in
+                                        let key = "manual-\(host.id.uuidString)"
+                                        if visible { menuBarGraphKeys.insert(key) }
+                                        else { menuBarGraphKeys.remove(key) }
+                                    }
+                                )) {
                                     manualHosts.removeAll { $0.id == host.id }
                                 }
                             }
@@ -347,14 +367,29 @@ private struct HostListEditorSheet: View {
                     .buttonStyle(.bordered)
                 Button("Save", action: onSave)
                     .buttonStyle(.borderedProminent)
+                    .disabled(latencyHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
+    }
+
+    private func menuBarGraphToggle(for key: String) -> some View {
+        Toggle("Menu bar graph", isOn: Binding(
+            get: { menuBarGraphKeys.contains(key) },
+            set: { visible in
+                if visible { menuBarGraphKeys.insert(key) }
+                else { menuBarGraphKeys.remove(key) }
+            }
+        ))
+        .labelsHidden()
+        .help("Show ping graph in menu bar")
+        .frame(width: 108)
     }
 }
 
 private struct ManualHostRow: View {
     @Binding var host: ManualHostEntry
+    @Binding var showsMenuBarGraph: Bool
     let onRemove: () -> Void
 
     var body: some View {
@@ -372,6 +407,11 @@ private struct ManualHostRow: View {
             )
             .textFieldStyle(.roundedBorder)
             .frame(width: 72)
+
+            Toggle("Menu bar graph", isOn: $showsMenuBarGraph)
+                .labelsHidden()
+                .help("Show ping graph in menu bar")
+                .frame(width: 108)
 
             Button("Remove", role: .destructive, action: onRemove)
                 .buttonStyle(.borderless)
@@ -673,32 +713,6 @@ struct MiniLatencyGraph: View {
             return String(format: "%.1f ms", value)
         }
         return String(format: "%.0f ms", value)
-    }
-}
-
-private struct PingHostEditorSheet: View {
-    @Binding var host: String
-    let onCancel: () -> Void
-    let onSave: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Latency Host")
-                .font(.title3.weight(.semibold))
-            Text("Choose the host used for the top latency graph.")
-                .foregroundStyle(.secondary)
-            TextField("ping.sunet.se", text: $host)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.bordered)
-                Button("Save", action: onSave)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(24)
     }
 }
 

@@ -12,6 +12,7 @@ public final class HostStore: NSObject, ObservableObject {
     @Published public var latencyMonitorHost: String = "ping.sunet.se"
     @Published public private(set) var latencyMonitorSnapshot: PingSnapshot?
     @Published public private(set) var latencyHistory: [PingHistoryPoint] = []
+    @Published public private(set) var menuBarGraphHostKeys: Set<String> = ["latency-monitor"]
 
     private let scanner = BonjourScanner()
     private var hostIndexByService: [String: UUID] = [:]
@@ -23,9 +24,27 @@ public final class HostStore: NSObject, ObservableObject {
     private let maxLatencyHistoryPoints = 20 * 20
     private let maxPerHostPingHistoryPoints = 60
     private let manualHostsDefaultsKey = "Hostig.manualHosts"
+    private let latencyMonitorHostDefaultsKey = "Hostig.latencyMonitorHost"
+    private let menuBarGraphDefaultsKey = "Hostig.menuBarGraphHostKeys"
+
+    public static let latencyMonitorGraphKey = "latency-monitor"
+
+    public static func menuBarGraphKey(for host: HostRecord) -> String {
+        switch host.source {
+        case .bonjour: "bonjour:\(host.serviceName)"
+        case .manual: host.serviceName
+        }
+    }
 
     public override init() {
         super.init()
+        if let savedHost = UserDefaults.standard.string(forKey: latencyMonitorHostDefaultsKey),
+           !savedHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            latencyMonitorHost = savedHost
+        }
+        if let savedKeys = UserDefaults.standard.stringArray(forKey: menuBarGraphDefaultsKey) {
+            menuBarGraphHostKeys = Set(savedKeys)
+        }
         loadManualHosts()
         scanner.delegate = self
         scanner.start()
@@ -52,6 +71,7 @@ public final class HostStore: NSObject, ObservableObject {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != latencyMonitorHost else { return }
         latencyMonitorHost = trimmed
+        UserDefaults.standard.set(trimmed, forKey: latencyMonitorHostDefaultsKey)
         latencyHistory.removeAll()
         latencyMonitorSnapshot = nil
         restartLatencyMonitor()
@@ -61,6 +81,15 @@ public final class HostStore: NSObject, ObservableObject {
         manualHosts = normalizeManualHosts(entries)
         persistManualHosts()
         syncManualHosts()
+    }
+
+    public func showsMenuBarGraph(for key: String) -> Bool {
+        menuBarGraphHostKeys.contains(key)
+    }
+
+    public func updateMenuBarGraphHosts(_ keys: Set<String>) {
+        menuBarGraphHostKeys = keys
+        UserDefaults.standard.set(menuBarGraphHostKeys.sorted(), forKey: menuBarGraphDefaultsKey)
     }
 
     public func requestReboot(for id: UUID) async -> RebootAttemptResult {

@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import HostigLocalServices
 import HostigModels
+import Combine
 
 @MainActor
 final class MainWindowBridge: NSObject, ObservableObject, NSWindowDelegate {
@@ -58,6 +59,7 @@ final class StatusBarController: NSObject {
     private var isPanelPresented = false
     private var localMonitor: Any?
     private var globalMonitor: Any?
+    private var graphSubscription: AnyCancellable?
 
     func configureIfNeeded(store: HostStore, mainWindowBridge: MainWindowBridge) {
         guard !configured else { return }
@@ -71,6 +73,19 @@ final class StatusBarController: NSObject {
             button.action = #selector(handleStatusItemClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+
+        graphSubscription = Publishers.Merge3(
+            store.$hosts.map { _ in () },
+            store.$latencyHistory.map { _ in () },
+            store.$menuBarGraphHostKeys.map { _ in () }
+        )
+        .sink { [weak self, weak store] _ in
+            DispatchQueue.main.async {
+                guard let self, let store else { return }
+                self.updateStatusItemGraph(from: store)
+            }
+        }
+        updateStatusItemGraph(from: store)
 
         let content = StatusPanelContent(
             store: store,
@@ -106,6 +121,81 @@ final class StatusBarController: NSObject {
             }
             self.closePanel()
         }
+    }
+
+    private func updateStatusItemGraph(from store: HostStore) {
+        guard let button = statusItem.button else { return }
+        var graphs: [(String, [PingHistoryPoint])] = []
+        if store.showsMenuBarGraph(for: HostStore.latencyMonitorGraphKey) {
+            graphs.append((store.latencyMonitorHost, store.latencyHistory))
+        }
+        for host in store.hosts where store.showsMenuBarGraph(for: HostStore.menuBarGraphKey(for: host)) {
+            graphs.append((host.displayName, host.pingHistory))
+        }
+
+        guard !graphs.isEmpty else {
+            statusItem.length = NSStatusItem.variableLength
+            button.image = NSImage(systemSymbolName: "server.rack", accessibilityDescription: "Hostig")
+            button.toolTip = "Hostig"
+            return
+        }
+
+        let graphWidth: CGFloat = 54
+        let height: CGFloat = 20
+        let labelFont = NSFont.systemFont(ofSize: 10, weight: .medium)
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: labelFont,
+            .foregroundColor: NSColor.labelColor
+        ]
+        let entries = graphs.map { name, history in
+            (name: String(name.prefix(14)), history: history)
+        }
+        let widths = entries.map { ($0.name as NSString).size(withAttributes: labelAttributes).width + graphWidth + 14 }
+        let width = widths.reduce(0, +) + 8
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
+            var x: CGFloat = 4
+            for (index, entry) in entries.enumerated() {
+                let labelWidth = (entry.name as NSString).size(withAttributes: labelAttributes).width
+                (entry.name as NSString).draw(at: NSPoint(x: x, y: 4), withAttributes: labelAttributes)
+                x += labelWidth + 5
+                Self.drawSparkline(entry.history, in: NSRect(x: x, y: 3, width: graphWidth, height: 14))
+                x += graphWidth + 9
+                if index < entries.count - 1 {
+                    NSColor.separatorColor.setStroke()
+                    let separator = NSBezierPath()
+                    separator.move(to: NSPoint(x: x - 5, y: 3))
+                    separator.line(to: NSPoint(x: x - 5, y: 17))
+                    separator.stroke()
+                }
+            }
+            return true
+        }
+        image.isTemplate = false
+        statusItem.length = width
+        button.image = image
+        button.toolTip = graphs.map(\.0).joined(separator: " · ")
+    }
+
+    private static func drawSparkline(_ history: [PingHistoryPoint], in rect: NSRect) {
+        let points = Array(history.suffix(60))
+        guard !points.isEmpty else { return }
+        let maximum = max(points.compactMap(\.latencyMS).max() ?? 1, 1)
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        var started = false
+        for (index, point) in points.enumerated() {
+            guard let latency = point.latencyMS, latency.isFinite else {
+                started = false
+                continue
+            }
+            let x = rect.minX + rect.width * CGFloat(index) / CGFloat(max(points.count - 1, 1))
+            let y = rect.minY + rect.height * CGFloat(max(0, min(latency / maximum, 1)))
+            let location = NSPoint(x: x, y: y)
+            if started { path.line(to: location) }
+            else { path.move(to: location); started = true }
+        }
+        NSColor.systemTeal.setStroke()
+        path.stroke()
     }
 
     private func openPanel() {
